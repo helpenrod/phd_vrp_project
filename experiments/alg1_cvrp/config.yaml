@@ -1,0 +1,32 @@
+# experiments/alg1_cvrp/config.yaml
+name: CVRP Simple GA
+description: Minimal Genetic Algorithm for the Capacitated Vehicle Routing Problem
+constraints:
+  capacity: true
+fleet:
+  vehicles: 5
+  capacity: 100
+parameters:
+  population_size: 50
+  generations: 200
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  tournament_size: 3
+  seed: 42
+instance:
+  coordinates:
+    0: [50, 50]   # depot
+    1: [30, 60]
+    2: [20, 40]
+    3: [40, 30]
+    4: [60, 20]
+    5: [80, 40]
+    6: [70, 60]
+  demand:
+    1: 10
+    2: 15
+    3: 18
+    4: 20
+    5: 25
+    6: 10
+    
