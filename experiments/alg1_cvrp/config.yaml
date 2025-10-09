@@ -1,11 +1,16 @@
-# experiments/alg1_cvrp/config.yaml
-name: CVRP Simple GA
-description: Minimal Genetic Algorithm for the Capacitated Vehicle Routing Problem
+name: CVRP Direct GA (Minimal)
+description: Direct-coding GA baseline for CVRP (routes delimited by 0)
 constraints:
   capacity: true
-fleet:
-  vehicles: 5
-  capacity: 100
+  split_delivery: true   # set to false to enforce strict CVRP (no splits)
+
+
+operators:
+  selection: "tournament"
+  crossover: "route_based"
+  mutation: ["relocate", "swap"]
+  local_search: ["2opt"]   # optional, can be empty []
+
 parameters:
   population_size: 50
   generations: 200
@@ -13,6 +18,11 @@ parameters:
   mutation_prob: 0.2
   tournament_size: 3
   seed: 42
+  use_2opt: false
+
+fleet:
+  capacity: 100
+
 instance:
   coordinates:
     0: [50, 50]   # depot
@@ -24,9 +34,8 @@ instance:
     6: [70, 60]
   demand:
     1: 10
-    2: 15
+    2: 115     
     3: 18
     4: 20
     5: 25
-    6: 10
-    
+    6: 210

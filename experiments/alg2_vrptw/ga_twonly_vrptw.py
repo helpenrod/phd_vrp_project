@@ -1,54 +1,53 @@
-# Minimal GA with DIRECT coding (0-delimited routes)
+
+# Minimal GA for VRPTW (Time Windows only) with DIRECT coding (0-delimited routes)
 import random
 from copy import deepcopy
-from cvrp_instance import CVRPInstance, DEPOT
+from vrptw_twonly_instance import VRPTWInstance_TWOnly, DEPOT
 
-class GACVRP_Direct:
-    def __init__(self, instance: CVRPInstance, params: dict):
+class GAVRPTW_TWOnly:
+    def __init__(self, instance: VRPTWInstance_TWOnly, params: dict):
         self.inst = instance
         self.pop_size = int(params["population_size"])
         self.gens = int(params["generations"])
         self.pc = float(params["crossover_prob"])
         self.pm = float(params["mutation_prob"])
         self.tournament_k = int(params["tournament_size"])
-        # original flag remains; can also be enabled via operators.local_search
         self.use_2opt = bool(params.get("use_2opt", False))
         random.seed(int(params["seed"]))
 
-        # NEW (minimal): optional operator selection via YAML at parameters.operators
-        ops = params.get("operators", None)  # expect under parameters.operators
+        ops = params.get("operators", None)
         if ops:
-            # only "route_based" crossover is implemented here; others ignored for now
             self._crossover_kind = str(ops.get("crossover", "route_based")).lower()
             muts = ops.get("mutation", ["relocate", "swap"])
             self._mutation_choices = [m.lower() for m in muts] if muts else None
-            # allow 2opt via operators.local_search as well
             ls = [x.lower() for x in ops.get("local_search", [])]
             if "2opt" in ls:
                 self.use_2opt = True
         else:
             self._crossover_kind = "route_based"
-            self._mutation_choices = None  # fall back to original mixed mutate()
+            self._mutation_choices = None
 
     # ---------- population init ----------
     def _greedy_seed_routes(self, customers):
-        """Simple greedy packing by capacity -> list of routes"""
-        routes, cur, load = [], [], 0
+        """Greedy packing by TW feasibility only -> list of routes."""
+        routes = []
         for c in customers:
-            d = self.inst.demand[c]
-            if load + d > self.inst.capacity + 1e-9:
-                if cur:
-                    routes.append(cur)
-                cur, load = [c], d
-            else:
-                cur.append(c)
-                load += d
-        if cur:
-            routes.append(cur)
+            placed = False
+            best = self.inst.cheapest_feasible_insertion(routes, c)
+            if best[0] is not None:
+                r_idx, pos, _ = best
+                routes[r_idx].insert(pos, c)
+                placed = True
+            if not placed:
+                if self.inst.schedule_route([c])[0]:
+                    routes.append([c])
+                else:
+                    # keep singleton; repair will try to place later
+                    routes.append([c])
         return routes
 
     def initialize(self):
-        customers = list(self.inst.demand.keys())
+        customers = [k for k in self.inst.coords.keys() if k != DEPOT]
         pop = []
         for _ in range(self.pop_size):
             random.shuffle(customers)
@@ -59,7 +58,6 @@ class GACVRP_Direct:
 
     # ---------- evaluation ----------
     def evaluate(self, chrom):
-        # All operators keep feasibility; if broken, do a light repair (fallback)
         if not self.inst.is_feasible(chrom):
             chrom = self._repair(chrom)
         return self.inst.total_cost(chrom), chrom
@@ -68,49 +66,41 @@ class GACVRP_Direct:
     def tournament(self, pop):
         cand = random.sample(pop, self.tournament_k)
         scored = [(self.inst.total_cost(c), c) for c in cand]
-        scored.sort(key=lambda x: x[1])  # BUGFIX? keep as original: sort by cost
+        scored.sort(key=lambda x: x[0])
         return deepcopy(scored[0][1])
 
-    # ---------- crossover (Route-Based + greedy completion) ----------
+    # ---------- crossover ----------
     def crossover(self, p1, p2):
-        """
-        1) Pick random subset of routes from P1, copy to child.
-        2) Insert remaining customers in P2 order via cheapest feasible insertion;
-           if none fits, open a new route [c].
-        """
-        # minimal: we only implement route_based; ignore other names if provided
-        # (keeps behavior identical to the original)
         r1 = self.inst.split_chromosome(p1)
         r2 = self.inst.split_chromosome(p2)
 
-        # Step 1: pick subset of routes from P1
         keep_count = max(1, len(r1)//2) if r1 else 0
         kept_idx = set(random.sample(range(len(r1)), keep_count)) if r1 else set()
         child_routes = [deepcopy(r1[i]) for i in sorted(kept_idx)]
-        assigned = set(c for rt in child_routes for c in rt)
 
-        # Step 2: insert remaining customers following P2 order
+        assigned = set(c for rt in child_routes for c in rt)
         p2_order = [c for rt in r2 for c in rt]
         for c in p2_order:
             if c in assigned:
                 continue
             r_idx, pos, _ = self.inst.cheapest_feasible_insertion(child_routes, c)
             if r_idx is None:
-                # open new route
-                child_routes.append([c])
+                if self.inst.schedule_route([c])[0]:
+                    child_routes.append([c])
+                else:
+                    child_routes.append([c])  # fallback, let repair handle later
             else:
                 child_routes[r_idx].insert(pos, c)
             assigned.add(c)
 
         return self.inst.routes_to_chromosome(child_routes)
 
-    # ---------- mutations ----------
+    # ---------- mutation ----------
     def mutate(self, chrom):
         if random.random() > self.pm:
             return chrom
         routes = self.inst.split_chromosome(chrom)
 
-        # NEW (minimal): if mutations specified in YAML, pick from that list
         if self._mutation_choices:
             choice = random.choice(self._mutation_choices)
             if choice == "relocate":
@@ -118,26 +108,22 @@ class GACVRP_Direct:
             elif choice == "swap":
                 chrom = self._mutate_swap(routes)
             else:
-                # unknown name -> fall back to original behavior
                 chrom = self._mutate_original_mix(routes)
         else:
-            # original mixed behavior
             chrom = self._mutate_original_mix(routes)
 
-        # optional local improvement: 2-opt intra-route (one random route)
         if self.use_2opt:
             routes = self.inst.split_chromosome(chrom)
             if routes:
                 ri = random.randrange(len(routes))
-                routes[ri] = self._two_opt_intra(routes[ri])
+                routes[ri] = self._two_opt_intra_guarded(routes[ri])
                 chrom = self.inst.routes_to_chromosome(routes)
 
         return chrom
 
-    # original mixed mutation (relocate ~50% else swap)
     def _mutate_original_mix(self, routes):
         if len(routes) >= 2 and random.random() < 0.5:
-            # Relocate: move a random customer to cheapest feasible position in another route
+            # Relocate with TW guard
             src_idx = random.randrange(len(routes))
             while len(routes[src_idx]) == 0:
                 src_idx = random.randrange(len(routes))
@@ -147,19 +133,28 @@ class GACVRP_Direct:
             c = routes[src_idx].pop(pos)
             best = self.inst.cheapest_feasible_insertion(routes, c)
             if best[0] is None:
-                routes.append([c])
+                if self.inst.schedule_route([c])[0]:
+                    routes.append([c])
+                else:
+                    routes[src_idx].insert(pos, c)  # revert
             else:
                 r_idx, insert_pos, _ = best
                 routes[r_idx].insert(insert_pos, c)
         else:
-            # Swap: swap two customers in possibly different routes
+            # Swap with TW guard
             flat = [(ri, ci) for ri, r in enumerate(routes) for ci, _ in enumerate(r)]
             if len(flat) >= 2:
-                (r1, i1), (r2, i2) = random.sample(flat, 2)
-                routes[r1][i1], routes[r2][i2] = routes[r2][i2], routes[r1][i1]
+                for _ in range(10):
+                    (r1, i1), (r2, i2) = random.sample(flat, 2)
+                    a, b = routes[r1][i1], routes[r2][i2]
+                    if r1 == r2 and i1 == i2:
+                        continue
+                    routes[r1][i1], routes[r2][i2] = b, a
+                    if self.inst.schedule_route(routes[r1])[0] and self.inst.schedule_route(routes[r2])[0]:
+                        break
+                    routes[r1][i1], routes[r2][i2] = a, b
         return self.inst.routes_to_chromosome(routes)
 
-    # explicit relocate (used when YAML selects it)
     def _mutate_relocate(self, routes):
         if not routes:
             return self.inst.routes_to_chromosome(routes)
@@ -170,23 +165,31 @@ class GACVRP_Direct:
         c = routes[src_idx].pop(pos)
         best = self.inst.cheapest_feasible_insertion(routes, c)
         if best[0] is None:
-            routes.append([c])
+            if self.inst.schedule_route([c])[0]:
+                routes.append([c])
+            else:
+                routes[src_idx].insert(pos, c)  # revert
         else:
             r_idx, insert_pos, _ = best
             routes[r_idx].insert(insert_pos, c)
         return self.inst.routes_to_chromosome(routes)
 
-    # explicit swap (used when YAML selects it)
     def _mutate_swap(self, routes):
         flat = [(ri, ci) for ri, r in enumerate(routes) for ci, _ in enumerate(r)]
         if len(flat) >= 2:
-            (r1, i1), (r2, i2) = random.sample(flat, 2)
-            routes[r1][i1], routes[r2][i2] = routes[r2][i2], routes[r1][i1]
+            for _ in range(10):
+                (r1, i1), (r2, i2) = random.sample(flat, 2)
+                a, b = routes[r1][i1], routes[r2][i2]
+                if r1 == r2 and i1 == i2:
+                    continue
+                routes[r1][i1], routes[r2][i2] = b, a
+                if self.inst.schedule_route(routes[r1])[0] and self.inst.schedule_route(routes[r2])[0]:
+                    break
+                routes[r1][i1], routes[r2][i2] = a, b
         return self.inst.routes_to_chromosome(routes)
 
-    # ---------- local search helper ----------
-    def _two_opt_intra(self, route):
-        """Simple deterministic 2-opt improvement for ONE route."""
+    # ---------- local search ----------
+    def _two_opt_intra_guarded(self, route):
         best = route[:]
         best_cost = self.inst.route_cost(best)
         n = len(route)
@@ -196,6 +199,8 @@ class GACVRP_Direct:
             for i in range(n-1):
                 for k in range(i+1, n):
                     cand = best[:i] + list(reversed(best[i:k+1])) + best[k+1:]
+                    if not self.inst.schedule_route(cand)[0]:
+                        continue
                     c = self.inst.route_cost(cand)
                     if c + 1e-9 < best_cost:
                         best, best_cost = cand, c
@@ -205,26 +210,31 @@ class GACVRP_Direct:
                     break
         return best
 
-    # ---------- light repair (capacity only; rare due to operators) ----------
+    # ---------- repair (TW only) ----------
     def _repair(self, chrom):
         routes = [r[:] for r in self.inst.split_chromosome(chrom)]
-        # If any route exceeds capacity, greedily relocate last customers out
-        for idx, r in enumerate(routes):
-            while self.inst.route_load(r) > self.inst.capacity + 1e-9:
-                c = r.pop()  # remove last
-                ins = self.inst.cheapest_feasible_insertion(routes, c)
-                if ins[0] is None:
-                    routes.append([c])
-                else:
-                    routes[ins[0]].insert(ins[1], c)
-        # Remove empty routes just in case
-        routes = [r for r in routes if r]
+        changed = True
+        while changed:
+            changed = False
+            for idx, r in enumerate(list(routes)):
+                if r and not self.inst.schedule_route(r)[0]:
+                    # try moving the last customer out
+                    c = r.pop()
+                    ins = self.inst.cheapest_feasible_insertion(routes, c)
+                    if ins[0] is None:
+                        if self.inst.schedule_route([c])[0]:
+                            routes.append([c])
+                        else:
+                            r.append(c)  # revert
+                    else:
+                        routes[ins[0]].insert(ins[1], c)
+                    changed = True
+            routes = [x for x in routes if x]
         return self.inst.routes_to_chromosome(routes)
 
     # ---------- GA loop ----------
     def run(self):
         pop = self.initialize()
-        # evaluate
         scores = []
         for ind in pop:
             f, ind = self.evaluate(ind)
