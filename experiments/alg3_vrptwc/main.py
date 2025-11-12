@@ -1,17 +1,23 @@
 
-# Entry point for VRPTW (compatible with the new YAML layout).
-# If some TW fields are missing in the YAML, defaults are used.
+# Entry point for VRPTWC (Capacity and Time Windows).
 import sys
 import yaml
-from vrptw_instance import VRPTWInstance
-from ga_vrptw import GAVRPTW_Direct
+import os
 
-def load_config(path="experiments/alg2_vrptw/config.yaml"):
-    with open(path, "r") as f:
+# Add the project root to the Python path to allow imports from 'core'
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from .vrptw_instance import VRPTWInstance
+from core.ga_framework import GAFramework
+
+def load_config(path):
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 def main():
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "experiments/alg2_vrptw/config.yaml"
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "experiments/alg3_vrptwc/config.yaml"
     cfg = load_config(cfg_path)
 
     inst_cfg = cfg["instance"]
@@ -19,27 +25,27 @@ def main():
     demand = {int(k): v for k, v in inst_cfg["demand"].items()}
 
     # Optional TW fields with safe defaults
-    ready_time = {int(k): v for k, v in inst_cfg.get("ready_time", {}).items()}
-    due_time = {int(k): v for k, v in inst_cfg.get("due_time", {}).items()}
-    service_time = {int(k): v for k, v in inst_cfg.get("service_time", {}).items()}
-
+    ready_time = {int(k): v for k, v in inst_cfg.get("ready_time", {}).items()} if inst_cfg.get("ready_time") else {}
+    due_time = {int(k): v for k, v in inst_cfg.get("due_time", {}).items()} if inst_cfg.get("due_time") else {}
+    service_time = {int(k): v for k, v in inst_cfg.get("service_time", {}).items()} if inst_cfg.get("service_time") else {}
+    
+    fleet_cfg = cfg.get("fleet", {})
+    capacity = float(fleet_cfg.get("capacity", float("inf")))
+    speed = float(fleet_cfg.get("speed", 1.0))
+    
     allow_split = bool(cfg.get("constraints", {}).get("split_delivery", False))
-    speed = float(cfg.get("fleet", {}).get("speed", 1.0))
-    capacity = float(cfg["fleet"]["capacity"])
 
-    inst = VRPTWInstance(coords, demand, capacity,
+    inst = VRPTWInstance(coords, demand=demand, capacity=capacity,
                          ready_time=ready_time, due_time=due_time, service_time=service_time,
                          speed=speed, allow_split_delivery=allow_split)
 
-    ga = GAVRPTW_Direct(inst, cfg["parameters"])
+    ga = GAFramework(inst, cfg["parameters"])
     best, cost = ga.run()
 
     routes_tokens = inst.split_chromosome(best)
     routes_orig = inst.render_routes_original_ids(routes_tokens)
-    chrom_orig = inst.render_chromosome_original_ids(best)
 
-    print("\n=== FINAL SOLUTION (VRPTW; DIRECT CODING; ORIGINAL IDs) ===")
-    print("Chromosome:", chrom_orig)
+    print("\n=== FINAL SOLUTION (VRPTWC; FRAMEWORK; ORIGINAL IDs) ===")
     print("Routes:")
     for r in routes_orig:
         print("  " + "0-" + "-".join(map(str, r)) + "-0")
