@@ -27,6 +27,8 @@ def relocate_mutation(routes: list, inst) -> list:
         routes[r_idx].insert(insert_pos, c)
     return routes
 
+relocate_mutation.tags = {'capacity', 'time_window'}
+
 def swap_mutation(routes: list, inst) -> list:
     """
     Swaps two random customers, checking for feasibility.
@@ -44,3 +46,5 @@ def swap_mutation(routes: list, inst) -> list:
         routes[r1][i1], routes[r2][i2] = routes[r2][i2], routes[r1][i1] # Revert
 
     return routes
+
+swap_mutation.tags = {'capacity', 'time_window'}

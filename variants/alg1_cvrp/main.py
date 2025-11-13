@@ -10,7 +10,7 @@ if project_root not in sys.path:
 from .cvrp_instance import CVRPInstance
 from core.ga_framework import GAFramework
 
-def load_config(path="experiments/alg1_cvrp/config.yaml"):
+def load_config(path="variants/alg1_cvrp/config.yaml"):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -18,7 +18,7 @@ def pretty_routes(routes):
     return ["0-" + "-".join(map(str, r)) + "-0" for r in routes]
 
 def main():
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "experiments/alg1_cvrp/config.yaml"
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "variants/alg1_cvrp/config.yaml"
     cfg = load_config(cfg_path)
     coords = {int(k): v for k, v in cfg["instance"]["coordinates"].items()}
     demand = {int(k): v for k, v in cfg["instance"]["demand"].items()}

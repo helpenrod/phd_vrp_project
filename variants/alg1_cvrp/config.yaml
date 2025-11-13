@@ -1,15 +1,11 @@
 name: CVRP Direct GA (Minimal)
 description: Direct-coding GA baseline for CVRP (routes delimited by 0)
+
+objective: distance
+
 constraints:
-  capacity: true
+  problem_type: [capacity]
   split_delivery: true   # set to false to enforce strict CVRP (no splits)
-
-
-operators:
-  selection: "tournament"
-  crossover: "route_based"
-  mutation: ["relocate", "swap"]
-  local_search: ["2opt"]   # optional, can be empty []
 
 parameters:
   population_size: 50

@@ -35,3 +35,5 @@ def route_based_crossover(p1: list, p2: list, inst) -> list:
         assigned.add(c)
 
     return inst.routes_to_chromosome(child_routes)
+
+route_based_crossover.tags = {'capacity', 'time_window'}

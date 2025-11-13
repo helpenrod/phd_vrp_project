@@ -7,7 +7,10 @@ fleet:
   capacity: 30   # vehicle capacity (homogeneous fleet)
   speed: 1.0     # time = Euclidean distance / speed
 
+objective: distance  # The user can set this to 'distance' or 'time'
+
 constraints:
+  problem_type: [capacity, time_window]
   split_delivery: false  # set true only if you want automatic demand splitting
 
 parameters:
@@ -17,11 +20,6 @@ parameters:
   crossover_prob: 0.9
   mutation_prob: 0.3
   tournament_size: 3
-  use_2opt: true
-  operators:
-    crossover: route_based
-    mutation: [relocate, swap]
-    local_search: [2opt]
 
 instance:
   # Node 0 must be the depot
@@ -90,4 +88,3 @@ instance:
     8: 5
     9: 5
     10: 5
-

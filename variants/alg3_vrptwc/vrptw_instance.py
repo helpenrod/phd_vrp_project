@@ -171,9 +171,18 @@ class VRPTWInstance:
         d += self.dist[route[-1]][DEPOT]
         return d
 
-    def total_cost(self, chrom):
+    def total_distance_cost(self, chrom):
+        """Calculates the total distance traveled for all routes in a chromosome."""
         routes = self.split_chromosome(chrom)
         return sum(self.route_cost(r) for r in routes)
+
+    def total_time_cost(self, chrom):
+        """Calculates the sum of finish times for all routes (total operational time)."""
+        routes = self.split_chromosome(chrom)
+        total_time = 0
+        for r in routes:
+            total_time += self.schedule_route(r)[3] # schedule_route returns (feasible, ..., finish_time)
+        return total_time
 
     # ---------- time window schedule ----------
     def schedule_route(self, route):

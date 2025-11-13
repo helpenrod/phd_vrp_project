@@ -17,7 +17,7 @@ def load_config(path):
         return yaml.safe_load(f)
 
 def main():
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "experiments/alg3_vrptwc/config.yaml"
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else "variants/alg3_vrptwc/config.yaml"
     cfg = load_config(cfg_path)
 
     inst_cfg = cfg["instance"]

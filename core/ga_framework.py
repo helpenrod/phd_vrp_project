@@ -27,6 +27,16 @@ class GAFramework:
         self.tournament_k = int(params["tournament_size"])
         random.seed(int(params["seed"]))
 
+        # --- DYNAMIC OBJECTIVE FUNCTION SELECTION ---
+        objective = params.get("objective", "distance").lower()
+        if objective == "distance":
+            self.cost_function = self.inst.total_distance_cost
+        elif objective == "time":
+            self.cost_function = self.inst.total_time_cost
+        else:
+            raise ValueError(f"Unknown objective function: {objective}")
+        # All future cost evaluations will use self.cost_function
+
         # --- HYPER-HEURISTIC OPERATOR SELECTION ---
         ops = params.get("operators", {})
         
@@ -82,11 +92,11 @@ class GAFramework:
     def evaluate(self, chrom):
         if not self.inst.is_feasible(chrom):
             chrom = self._repair(chrom)
-        return self.inst.total_cost(chrom), chrom
+        return self.cost_function(chrom), chrom
 
     # ---------- selection (delegated) ----------
     def tournament(self, pop):
-        return selection.tournament_selection(pop, self.tournament_k, self.inst)
+        return selection.tournament_selection(pop, self.tournament_k, self.cost_function)
 
     # ---------- crossover (delegated) ----------
     def crossover(self, p1, p2):
@@ -167,7 +177,7 @@ class GAFramework:
     # ---------- GA loop ----------
     def run(self):
         pop = self.initialize()
-        scores = [self.inst.total_cost(ind) for ind in pop]
+        scores = [self.cost_function(ind) for ind in pop]
 
         best_idx = min(range(len(pop)), key=lambda i: scores[i])
         best, best_fit = deepcopy(pop[best_idx]), scores[best_idx]
@@ -185,7 +195,7 @@ class GAFramework:
                 new_pop.append(child)
 
             pop = new_pop
-            scores = [self.inst.total_cost(ind) for ind in pop]
+            scores = [self.cost_function(ind) for ind in pop]
             cur_idx = min(range(len(pop)), key=lambda i: scores[i])
             if scores[cur_idx] + 1e-9 < best_fit:
                 best_fit = scores[cur_idx]
