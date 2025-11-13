@@ -31,7 +31,10 @@ def route_based_crossover(p1: list, p2: list, inst) -> list:
             else:
                 child_routes.append([c])  # Fallback: let repair handle it
         else:
-            child_routes[r_idx].insert(pos, c)
+            if r_idx == len(child_routes):
+                child_routes.append([c])
+            else:
+                child_routes[r_idx].insert(pos, c)
         assigned.add(c)
 
     return inst.routes_to_chromosome(child_routes)

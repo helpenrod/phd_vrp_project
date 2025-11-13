@@ -67,7 +67,10 @@ class GAFramework:
             best = self.inst.cheapest_feasible_insertion(routes, c)
             if best[0] is not None:
                 r_idx, pos, _ = best
-                routes[r_idx].insert(pos, c)
+                if r_idx == len(routes):
+                    routes.append([c])
+                else:
+                    routes[r_idx].insert(pos, c)
             else:
                 # If no insertion is possible, try to form a new route
                 # The instance's feasibility check will handle this

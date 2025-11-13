@@ -250,22 +250,36 @@ class VRPTWInstance:
     def cheapest_feasible_insertion(self, routes, customer):
         """
         Returns (best_route_index, best_pos, best_delta) to insert 'customer' feasibly wrt capacity & TW.
-        If none fits, return (None, None, None).
+        This can be an existing route, or a new route (index = len(routes)).
+        If no feasible insertion exists at all, returns (None, None, None).
         """
         best = (None, None, None)
+        best_delta = float('inf')
         dem = self.demand[customer]
+
+        # 1. Try inserting into existing routes
         for r_idx, r in enumerate(routes):
             if self.route_load(r) + dem > self.capacity + 1e-9:
                 continue
             base_cost = self.route_cost(r)
-            for pos in range(len(r)+1):
+            for pos in range(len(r) + 1):
                 new_r = r[:pos] + [customer] + r[pos:]
                 ok, *_ = self.schedule_route(new_r)
                 if not ok:
                     continue
                 delta = self.route_cost(new_r) - base_cost
-                if best[2] is None or delta < best[2]:
+                if delta < best_delta:
                     best = (r_idx, pos, delta)
+                    best_delta = delta
+
+        # 2. Try creating a new route
+        if self.demand[customer] <= self.capacity + 1e-9:
+            is_schedulable, *_ = self.schedule_route([customer])
+            if is_schedulable:
+                new_route_cost = self.route_cost([customer])
+                if new_route_cost < best_delta:
+                    best = (len(routes), 0, new_route_cost)
+
         return best
 
     # ---------- render helpers (map clones -> original IDs) ----------
