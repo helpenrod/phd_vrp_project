@@ -1,0 +1,31 @@
+flowchart TD
+    A([Start]) --> B["Load config.yaml<br/>problem data + problem_type + objective"]
+    B --> C{Config valid?}
+    C -- No --> C1["Raise error<br/>missing/invalid fields"] --> Z([End])
+    C -- Yes --> D["HyperHeuristic: read problem_type<br/>e.g., [capacity, time_window]"]
+
+    D --> E["Map each restriction to primitive checker<br/>core/constraints/"]
+    E --> F{Unknown restriction key?}
+    F -- Yes --> F1["Raise error<br/>restriction not supported"] --> Z
+    F -- No --> G["Build DynamicInstance<br/>dynamic_instance.py<br/>load all available data"]
+
+    G --> H["Inject checkers into instance<br/>instance.constraint_checkers = [...]"]
+    H --> I["Compose feasibility dynamically<br/>feasible(routes)=AND(check_i(routes))"]
+
+    I --> J["Auto-detect operators in core/operators/<br/>read tags/metadata"]
+    J --> K["Filter operators by active restrictions<br/>keep only compatible ones"]
+    K --> L{Any compatible operator set?}
+    L -- No --> L1["Raise error<br/>no operators match restrictions"] --> Z
+    L -- Yes --> M["Initialize GAFramework<br/>ga_framework.py<br/>params + RNG seed"]
+
+    M --> N["GA: generate initial population<br/>generic insertion heuristics"]
+    N --> O["Evaluate individuals<br/>1) feasibility via DynamicInstance<br/>2) cost via objective (distance/time/...)"]
+    O --> P{Termination met?<br/>max iters/time/no-improve}
+    P -- Yes --> Q["Return best individual<br/>+ metrics + plots (planned)"] --> Z
+    P -- No --> R["Selection operator<br/>from compatible set"]
+    R --> S["Crossover operator<br/>from compatible set"]
+    S --> T["Mutation operator<br/>from compatible set"]
+    T --> U["Optional: repair / local search<br/>(if implemented)"]
+    U --> V["Re-evaluate offspring<br/>feasibility + cost"]
+    V --> W["Replacement / elitism<br/>form next generation"]
+    W --> O

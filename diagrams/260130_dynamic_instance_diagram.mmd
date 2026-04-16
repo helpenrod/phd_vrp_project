@@ -1,0 +1,53 @@
+flowchart TD
+  A([Start]) --> B["DynamicInstance.__init__(config, constraint_checkers)"]
+
+  B --> C["Read config sections<br/>inst_data=config['instance']
+<br/>fleet_data=config.get('fleet',{})
+<br/>constraints_config=config.get('constraints',{})"]
+
+  C --> D["Load raw data dicts<br/>coords, demand, ready_time, due_time, service_time"]
+  D --> E["Set fleet/constraint params<br/>capacity, speed, allow_split_delivery"]
+  E --> F["Init original_map = {}"]
+
+  F --> G["_maybe_split_demands(coords, demand, rt, dt, st)"]
+  G --> H{"max demand <= capacity?"}
+
+  H -- Yes --> I["No split<br/>original_map[nid]=nid for all nodes<br/>return copies of dicts"]
+  H -- No --> J{"allow_split_delivery?"}
+  J -- No --> K["Raise ValueError<br/>demand > capacity and split not allowed"]
+  J -- Yes --> L["Split demands into clones<br/>clone nodes share coords/TW/service<br/>original_map[clone]=original customer"]
+
+  I --> M["Store processed data<br/>self.coords/self.demand/..."]
+  L --> M
+
+  M --> N["Ensure DEPOT defaults<br/>ready_time[0]=0, due_time[0]=inf, service_time[0]=0"]
+  N --> O["Compute n_customers"]
+  O --> P["_compute_distance_matrix()"]
+  P --> Q["Store constraint_checkers injected by HH<br/>self.constraint_checkers = constraint_checkers"]
+  Q --> R(["Instance ready"])
+
+  %% ---- Runtime methods ----
+  subgraph Runtime_Usage["Runtime usage: costs, schedule, feasibility"]
+    R --> S["Chromosome utilities<br/>split_chromosome / routes_to_chromosome"]
+    R --> T["Cost utilities<br/>route_cost / total_distance_cost"]
+    R --> U["Time-window schedule<br/>schedule_route(route)"]
+    U --> V["total_time_cost(chrom)<br/>inf if any route infeasible"]
+
+    R --> W["Feasibility entry<br/>is_feasible(chrom)"]
+    W --> X["split_chromosome -> routes"]
+    X --> Y["is_feasible_routes(routes)"]
+    Y --> Y1["Basic checks<br/>non-empty routes, no duplicates"]
+    Y1 --> Y2["Coverage check<br/>served customers == all customers"]
+    Y2 --> Z["Apply injected constraint checkers<br/>for checker in self.constraint_checkers"]
+    Z --> Z1{"Any checker fails?"}
+    Z1 -- Yes --> Z2["Return False"]
+    Z1 -- No --> Z3["Return True"]
+
+    R --> AA["cheapest_feasible_insertion(routes, customer)"]
+    AA --> AB["Try all positions in all routes"]
+    AB --> AC["Trial routes -> is_feasible_routes"]
+    AC --> AD["Track min additional cost"]
+    AA --> AE["Also try new route [customer]"]
+    AE --> AF["If feasible and cheaper, choose it"]
+    AF --> AG["Return (route_idx, pos, cost) or (None,None,inf)"]
+  end

@@ -1,0 +1,1 @@
+python3 -m core.main variants/alg3_vrptwc/config.yaml
