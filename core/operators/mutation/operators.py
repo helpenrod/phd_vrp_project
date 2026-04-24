@@ -1,50 +1,102 @@
-# Reusable mutation operators
 import random
 
-def relocate_mutation(routes: list, inst) -> list:
-    """
-    Picks a random customer and relocates it to the cheapest feasible position.
-    Relies on `inst.cheapest_feasible_insertion`.
-    """
-    if not routes:
-        return routes
+def relocate_mutation(routes, inst):
+    """Standard relocate: move one random node. Safe for all variants."""
+    if not routes: return routes
+    all_nodes = [n for r in routes for n in r]
+    if not all_nodes: return routes
+    target = random.choice(all_nodes)
     
-    src_idx = random.randrange(len(routes))
-    while not routes[src_idx]:
-        src_idx = (src_idx + 1) % len(routes)
-
-    pos = random.randrange(len(routes[src_idx]))
-    c = routes[src_idx].pop(pos)
+    new_routes = []
+    for r in routes:
+        filtered = [n for n in r if n != target]
+        if filtered: new_routes.append(filtered)
+        
+    # Use the new insertion signature: (r_idx, p_pos, d_pos, cost)
+    res = inst.cheapest_feasible_insertion(new_routes, target)
+    r_idx, pos = res[0], res[1]
     
-    best = inst.cheapest_feasible_insertion(routes, c)
-    if best[0] is None:
-        if inst.is_feasible_routes([[c]]):
-            routes.append([c])
-        else:
-            routes[src_idx].insert(pos, c)  # Revert
-    else:
-        r_idx, insert_pos, _ = best
-        routes[r_idx].insert(insert_pos, c)
+    if r_idx is not None:
+        if r_idx == len(new_routes): new_routes.append([target])
+        else: new_routes[r_idx].insert(pos, target)
+        return new_routes
     return routes
 
 relocate_mutation.tags = {'capacity', 'time_window'}
 
-def swap_mutation(routes: list, inst) -> list:
-    """
-    Swaps two random customers, checking for feasibility.
-    Relies on `inst.is_feasible_routes` (or `schedule_route` for speed).
-    """
-    flat = [(ri, ci) for ri, r in enumerate(routes) for ci, _ in enumerate(r)]
-    if len(flat) < 2:
-        return routes
-
-    (r1, i1), (r2, i2) = random.sample(flat, 2)
-    routes[r1][i1], routes[r2][i2] = routes[r2][i2], routes[r1][i1]
-
-    # Check if the modified routes are feasible.
-    if not inst.is_feasible_routes([routes[r1]]) or (r1 != r2 and not inst.is_feasible_routes([routes[r2]])):
-        routes[r1][i1], routes[r2][i2] = routes[r2][i2], routes[r1][i1] # Revert
-
+def swap_mutation(routes, inst):
+    """Standard swap: swap two random nodes if feasible."""
+    if not routes: return routes
+    all_pos = [(ri, ni) for ri, r in enumerate(routes) for ni in range(len(r))]
+    if len(all_pos) < 2: return routes
+    
+    (r1, n1), (r2, n2) = random.sample(all_pos, 2)
+    new_routes = [r[:] for r in routes]
+    new_routes[r1][n1], new_routes[r2][n2] = new_routes[r2][n2], new_routes[r1][n1]
+    
+    if inst.is_feasible_routes(new_routes): return new_routes
     return routes
 
 swap_mutation.tags = {'capacity', 'time_window'}
+
+def pd_relocate_mutation(routes, inst):
+    """Relocates a random PD-pair (or single node) to its cheapest feasible position."""
+    if not routes: return routes
+    
+    all_nodes = [n for r in routes for n in r]
+    if not all_nodes: return routes
+    
+    target = random.choice(all_nodes)
+    # Identify the pair
+    p = target if target in inst.pd_pairs else inst.delivery_to_pickup.get(target, target)
+    d = inst.pd_pairs.get(p)
+    
+    # 1. Remove the pair
+    new_routes = []
+    for r in routes:
+        filtered = [node for node in r if node != p and node != d]
+        if filtered:
+            new_routes.append(filtered)
+            
+    # 2. Re-insert optimally
+    r_idx, p_pos, d_pos, _ = inst.cheapest_feasible_insertion(new_routes, p)
+    
+    if r_idx is not None:
+        if r_idx == len(new_routes):
+            new_routes.append([p, d] if d else [p])
+        else:
+            new_routes[r_idx].insert(p_pos, p)
+            if d_pos is not None:
+                new_routes[r_idx].insert(d_pos, d)
+    else:
+        # Fallback
+        new_routes.append([p, d] if d else [p])
+        
+    return new_routes
+
+pd_relocate_mutation.tags = {'capacity', 'time_window', 'pickup_delivery'}
+
+def pd_swap_mutation(routes, inst):
+    """PD-Aware swap: Re-inserts two PD-pairs greedily."""
+    pickups = [n for r in routes for n in r if n in inst.pd_pairs]
+    if len(pickups) < 2: return routes
+    
+    p_chosen = random.sample(pickups, 2)
+    pairs = [(p, inst.pd_pairs[p]) for p in p_chosen]
+    
+    new_routes = []
+    for r in routes:
+        filtered = [n for n in r if n not in (p_chosen[0], pairs[0][1], p_chosen[1], pairs[1][1])]
+        if filtered: new_routes.append(filtered)
+        
+    for p, d in pairs:
+        r_idx, p_pos, d_pos, _ = inst.cheapest_feasible_insertion(new_routes, p)
+        if r_idx is not None:
+            if r_idx == len(new_routes): new_routes.append([p, d])
+            else:
+                new_routes[r_idx].insert(p_pos, p)
+                new_routes[r_idx].insert(d_pos, d)
+        else: new_routes.append([p, d])
+    return new_routes
+
+pd_swap_mutation.tags = {'capacity', 'time_window', 'pickup_delivery'}

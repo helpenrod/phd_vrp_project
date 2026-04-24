@@ -1,22 +1,18 @@
-# The core Hyper-Heuristic (HH) class.
-# This class is responsible for the intelligent selection of components.
-import yaml
 import inspect
-
+import yaml
 from core.ga_framework import GAFramework
 from core.operators import crossover, mutation, selection
 
-# --- Mapping constraints to the correct Instance class ---
-# This is a simple knowledge base for the HH.
-# It tells the HH which Instance class to use for a given set of constraints.
-from variants.alg1_cvrp.cvrp_instance import CVRPInstance
-from variants.alg2_vrptw.vrptw_twonly_instance import VRPTWInstance_TWOnly
-from variants.alg3_vrptwc.vrptw_instance import VRPTWInstance
+# NEW: Import the dynamic instance and primitive constraint checkers
+from core.hyperheuristic.dynamic_instance import DynamicInstance
+from core.constraints import capacity, time_window, pickup_delivery
 
-INSTANCE_MAP = {
-    frozenset(['capacity']): CVRPInstance,
-    frozenset(['time_window']): VRPTWInstance_TWOnly,
-    frozenset(['capacity', 'time_window']): VRPTWInstance,
+# NEW: Map constraint names to their primitive checker functions.
+# This is the HH's knowledge base of primitive components.
+CONSTRAINT_CHECKER_MAP = {
+    'capacity': capacity.check_capacity,
+    'time_window': time_window.check_time_windows,
+    'pickup_delivery': pickup_delivery.check_pickup_delivery,
 }
 
 class HyperHeuristic:
@@ -86,27 +82,20 @@ class HyperHeuristic:
         selected_ops = self._select_operators(problem_constraints)
         print(f"HH: Selected operators: {selected_ops}")
 
-        # 4. Select and Instantiate the correct Instance class
-        InstanceClass = INSTANCE_MAP.get(problem_constraints)
-        if not InstanceClass:
-            raise NotImplementedError(f"No instance class registered for constraint set: {problem_constraints}")
-        
-        # Create the instance object from the config data
-        inst_data = config['instance']
-        fleet_data = config.get('fleet', {})
-        allow_split = constraints_config.get('split_delivery', False)
-        inst = InstanceClass(
-            coords=inst_data['coordinates'],
-            demand=inst_data.get('demand'),
-            capacity=fleet_data.get('capacity'),
-            ready_time=inst_data.get('ready_time'),
-            due_time=inst_data.get('due_time'),
-            service_time=inst_data.get('service_time'),
-            speed=fleet_data.get('speed', 1.0),
-            allow_split_delivery=allow_split
-        )
+        # 4. GENERATE the list of constraint checkers
+        checkers_to_inject = []
+        for constraint in problem_constraints:
+            checker_func = CONSTRAINT_CHECKER_MAP.get(constraint)
+            if checker_func:
+                checkers_to_inject.append(checker_func)
+            else:
+                raise NotImplementedError(f"No constraint checker registered for: {constraint}")
+        print(f"HH: Generating instance with checkers: {[c.__name__ for c in checkers_to_inject]}")
 
-        # 5. Configure and Run the GA Framework
+        # 5. Instantiate the DynamicInstance with the generated checkers
+        inst = DynamicInstance(config, checkers_to_inject)
+
+        # 6. Configure and Run the GA Framework
         ga_params = config['parameters']
         ga_params['operators'] = selected_ops # Override operators with the HH's choice
         ga_params['objective'] = config.get('objective', 'distance') # Pass the objective to the framework

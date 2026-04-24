@@ -1,0 +1,30 @@
+flowchart TD
+  A([Start]) --> B["HyperHeuristic.solve(problem_config_path)"]
+
+  B --> C["Open YAML file<br/>with open(... ) as f"]
+  C --> D["Parse YAML -> config<br/>config = yaml.safe_load(f)"]
+
+  D --> E["Read constraints section<br/>constraints_config = config.get('constraints', {})"]
+  E --> F["Extract problem constraints<br/>problem_constraints = frozenset(constraints_config.get('problem_type', []))"]
+  F --> G{"problem_constraints empty?"}
+  G -- Yes --> H["Raise ValueError<br/>must specify constraints.problem_type list"]
+  G -- No --> I["Select operators based on constraints<br/>selected_ops = _select_operators(problem_constraints)"]
+
+  I --> J["Build constraint checker list<br/>for constraint in problem_constraints:<br/>checker = CONSTRAINT_CHECKER_MAP[constraint]"]
+  J --> K{"Missing checker in map?"}
+  K -- Yes --> L["Raise NotImplementedError<br/>no checker registered"]
+  K -- No --> M["Instantiate DynamicInstance<br/>inst = DynamicInstance(config, checkers_to_inject)"]
+
+  M --> N["Prepare GA params<br/>ga_params = config['parameters']"]
+  N --> O["Override GA operators + objective<br/>ga_params['operators']=selected_ops<br/>ga_params['objective']=config.get('objective','distance')"]
+  O --> P["Instantiate GA framework<br/>ga = GAFramework(inst, ga_params)"]
+  P --> Q["Run GA search<br/>best_solution, best_cost = ga.run()"]
+  Q --> R["Return results<br/>return inst, best_solution, best_cost"]
+
+  %% ---- Internal collaborations (conceptual) ----
+  subgraph GAFramework_Runtime["GAFramework runtime: where DynamicInstance is used"]
+    Q --> S["GA loop (selection/crossover/mutation/local_search)<br/>operators named in ga_params['operators']"]
+    S --> T["Feasibility checks call instance methods<br/>inst.is_feasible(chrom) / inst.is_feasible_routes(routes)"]
+    T --> U["DynamicInstance applies injected checkers<br/>for checker in inst.constraint_checkers:<br/>checker(routes, inst)"]
+    S --> V["Fitness evaluation calls instance cost methods<br/>inst.total_distance_cost(...)<br/>or inst.total_time_cost(...)"]
+  end
