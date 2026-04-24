@@ -22,6 +22,15 @@ class DynamicInstance:
         due_time = {int(k): float(v) for k, v in inst_data.get('due_time', {}).items()}
         service_time = {int(k): float(v) for k, v in inst_data.get('service_time', {}).items()}
 
+        # Initialize PD pairs from either dict format or list of objects
+        self.pd_pairs = {}
+        if 'pickups' in inst_data:
+            self.pd_pairs = {int(k): int(v) for k, v in inst_data['pickups'].items()}
+        elif 'pickup_delivery_pairs' in inst_data:
+            self.pd_pairs = {int(p['pickup']): int(p['delivery']) for p in inst_data['pickup_delivery_pairs']}
+        
+        self.delivery_to_pickup = {v: k for k, v in self.pd_pairs.items()}
+
         self.capacity = float(fleet_data.get('capacity', float('inf')))
         self.speed = float(fleet_data.get('speed', 1.0))
         self.allow_split_delivery = bool(constraints_config.get('split_delivery', False))
@@ -172,13 +181,12 @@ class DynamicInstance:
         return True, arrival_times, start_times, time
 
     # ---------- DYNAMIC FEASIBILITY (GENERATED) ----------
-    def is_feasible_routes(self, routes):
+    def is_feasible_routes(self, routes, check_coverage=False):
         """
         Checks for basic validity (coverage) and then applies all dynamically
         injected constraint checkers.
         """
         seen = set()
-        all_customers = set(k for k in self.demand.keys() if k != DEPOT)
 
         # Basic checks: no empty routes, no duplicate customers
         for r in routes:
@@ -187,9 +195,11 @@ class DynamicInstance:
                 if c in seen: return False
                 seen.add(c)
         
-        # Coverage check: all customers must be served
-        if seen != all_customers:
-            return False
+        # Coverage check: only enforced for final solution evaluation
+        if check_coverage:
+            all_customers = set(k for k in self.demand.keys() if k != DEPOT)
+            if seen != all_customers:
+                return False
 
         # GENERATIVE STEP: Apply all injected constraint checkers
         for checker_func in self.constraint_checkers:
@@ -199,38 +209,59 @@ class DynamicInstance:
         return True
 
     def is_feasible(self, chrom):
-        return self.is_feasible_routes(self.split_chromosome(chrom))
+        return self.is_feasible_routes(self.split_chromosome(chrom), check_coverage=True)
 
     # ---------- helper: cheapest feasible insertion ----------
-    def cheapest_feasible_insertion(self, routes, customer):
-        best_insertion = {'cost': float('inf'), 'route_idx': None, 'pos': None}
-    
+    def cheapest_feasible_insertion(self, routes, node):
+        """
+        PD-Aware insertion. If node is a pickup, it finds the best (i, j) for (pickup, delivery).
+        Note: Deliveries should not be passed here directly; the framework should iterate over pickups.
+        """
+        if node in self.delivery_to_pickup:
+            return None, None, float('inf')
+
+        pickup = node
+        delivery = self.pd_pairs.get(pickup)
+        
+        best_insertion = {'cost': float('inf'), 'route_idx': None, 'p_pos': None, 'd_pos': None}
+
         # Case 1: Try inserting into existing routes
         for r_idx, r in enumerate(routes):
             base_cost = self.route_cost(r)
-            for pos in range(len(r) + 1):
-                trial_route = r[:pos] + [customer] + r[pos:]
+            # Try all positions for the pickup
+            for i in range(len(r) + 1):
+                r_with_p = r[:i] + [pickup] + r[i:]
                 
-                # Create a copy of the routes for feasibility checking
-                trial_routes = list(routes)
-                trial_routes[r_idx] = trial_route
-    
-                # The feasibility check here is now fully dynamic!
-                if self.is_feasible_routes(trial_routes):
-                    insertion_cost = self.route_cost(trial_route) - base_cost
-                    if insertion_cost < best_insertion['cost']:
-                        best_insertion.update({'cost': insertion_cost, 'route_idx': r_idx, 'pos': pos})
-    
-        # Case 2: Try creating a new route for the customer
-        trial_routes = routes + [[customer]]
+                if not delivery:
+                    # Standard VRP node logic
+                    trial_routes = list(routes); trial_routes[r_idx] = r_with_p
+                    if self.is_feasible_routes(trial_routes):
+                        cost = self.route_cost(r_with_p) - base_cost
+                        if cost < best_insertion['cost']:
+                            best_insertion.update({'cost': cost, 'route_idx': r_idx, 'p_pos': i})
+                else:
+                    # PD Pair: Try all positions for delivery j such that j > i
+                    for j in range(i + 1, len(r_with_p) + 1):
+                        r_with_pd = r_with_p[:j] + [delivery] + r_with_p[j:]
+                        trial_routes = list(routes); trial_routes[r_idx] = r_with_pd
+                        
+                        if self.is_feasible_routes(trial_routes):
+                            cost = self.route_cost(r_with_pd) - base_cost
+                            if cost < best_insertion['cost']:
+                                best_insertion.update({'cost': cost, 'route_idx': r_idx, 'p_pos': i, 'd_pos': j})
+
+        # Case 2: Try creating a new route
+        new_r = [pickup, delivery] if delivery else [pickup]
+        trial_routes = routes + [new_r]
         if self.is_feasible_routes(trial_routes):
-            new_route_cost = self.route_cost([customer])
-            if new_route_cost < best_insertion['cost']:
-                best_insertion.update({'cost': new_route_cost, 'route_idx': len(routes), 'pos': 0})
-    
+            cost = self.route_cost(new_r)
+            if cost < best_insertion['cost']:
+                best_insertion.update({'cost': cost, 'route_idx': len(routes), 'p_pos': 0, 'd_pos': 1 if delivery else None})
+
         if best_insertion['route_idx'] is None:
-            return None, None, float('inf')
-        return best_insertion['route_idx'], best_insertion['pos'], best_insertion['cost']
+            return None, None, None, float('inf')
+            
+        return best_insertion['route_idx'], best_insertion['p_pos'], best_insertion['d_pos'], best_insertion['cost']
 
     # ---------- render helpers ----------
     def render_routes_original_ids(self, routes):

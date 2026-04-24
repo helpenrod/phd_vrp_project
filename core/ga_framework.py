@@ -40,20 +40,17 @@ class GAFramework:
         # --- HYPER-HEURISTIC OPERATOR SELECTION ---
         ops = params.get("operators", {})
         
-        # Crossover (defaults to route_based)
-        if str(ops.get("crossover", "route_based")).lower() == "route_based":
-            self.crossover_op = crossover.route_based_crossover
-        else:
-            # In the future, you could add more crossover types here
-            raise ValueError(f"Unknown crossover operator: {ops.get('crossover')}")
+        # Dynamic Crossover Selection (Allows HH to inject 'pd_route_based')
+        cx_name = str(ops.get("crossover", "route_based")).lower()
+        self.crossover_op = getattr(crossover, f"{cx_name}_crossover", crossover.route_based_crossover)
 
-        # Mutation (can be a list of choices)
+        # Dynamic Mutation Selection
         self.mutation_ops = []
         mutation_names = ops.get("mutation", ["relocate", "swap"])
         for m_name in mutation_names:
-            if m_name == "relocate": self.mutation_ops.append(mutation.relocate_mutation)
-            elif m_name == "swap": self.mutation_ops.append(mutation.swap_mutation)
-            else: raise ValueError(f"Unknown mutation operator: {m_name}")
+            op_func = getattr(mutation, f"{m_name}_mutation", None)
+            if op_func:
+                self.mutation_ops.append(op_func)
 
         # Local Search
         self.use_2opt = "2opt" in ops.get("local_search", [])
@@ -64,13 +61,17 @@ class GAFramework:
         routes = []
         # The instance's insertion method will respect its specific constraints
         for c in customers:
-            best = self.inst.cheapest_feasible_insertion(routes, c)
-            if best[0] is not None:
-                r_idx, pos, _ = best
+            res = self.inst.cheapest_feasible_insertion(routes, c)
+            r_idx, p_pos, d_pos, _ = res
+            
+            if r_idx is not None:
                 if r_idx == len(routes):
-                    routes.append([c])
+                    new_r = [c, self.inst.pd_pairs[c]] if c in self.inst.pd_pairs else [c]
+                    routes.append(new_r)
                 else:
-                    routes[r_idx].insert(pos, c)
+                    routes[r_idx].insert(p_pos, c)
+                    if d_pos is not None:
+                        routes[r_idx].insert(d_pos, self.inst.pd_pairs[c])
             else:
                 # If no insertion is possible, try to form a new route
                 # The instance's feasibility check will handle this
@@ -82,7 +83,13 @@ class GAFramework:
         return routes
 
     def initialize(self):
-        customers = [k for k in self.inst.demand.keys() if k != DEPOT]
+        # For PD problems, we only iterate over pickup nodes; 
+        # the insertion logic handles the corresponding delivery.
+        if hasattr(self.inst, 'pd_pairs') and self.inst.pd_pairs:
+            customers = [k for k in self.inst.demand.keys() if k != DEPOT and k not in self.inst.delivery_to_pickup]
+        else:
+            customers = [k for k in self.inst.demand.keys() if k != DEPOT]
+            
         pop = []
         for _ in range(self.pop_size):
             random.shuffle(customers)
@@ -169,9 +176,16 @@ class GAFramework:
 
         # Greedily re-insert unassigned customers
         for c in unassigned:
-            best = self.inst.cheapest_feasible_insertion(feasible_routes, c)
-            if best[0] is not None:
-                feasible_routes[best[0]].insert(best[1], c)
+            # Avoid redundant insertion for deliveries (handled with pickups)
+            if hasattr(self.inst, 'delivery_to_pickup') and c in self.inst.delivery_to_pickup:
+                continue
+                
+            res = self.inst.cheapest_feasible_insertion(feasible_routes, c)
+            r_idx, p_pos, d_pos, _ = res
+            if r_idx is not None:
+                feasible_routes[r_idx].insert(p_pos, c)
+                if d_pos is not None:
+                    feasible_routes[r_idx].insert(d_pos, self.inst.pd_pairs[c])
             elif self.inst.is_feasible_routes([[c]]):
                 feasible_routes.append([c])
         

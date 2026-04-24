@@ -5,13 +5,14 @@ from core.operators import crossover, mutation, selection
 
 # NEW: Import the dynamic instance and primitive constraint checkers
 from core.hyperheuristic.dynamic_instance import DynamicInstance
-from core.constraints import capacity, time_window
+from core.constraints import capacity, time_window, pickup_delivery
 
 # NEW: Map constraint names to their primitive checker functions.
 # This is the HH's knowledge base of primitive components.
 CONSTRAINT_CHECKER_MAP = {
     'capacity': capacity.check_capacity,
     'time_window': time_window.check_time_windows,
+    'pickup_delivery': pickup_delivery.check_pickup_delivery,
 }
 
 class HyperHeuristic:
