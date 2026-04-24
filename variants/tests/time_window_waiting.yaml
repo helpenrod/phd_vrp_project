@@ -1,0 +1,42 @@
+name: Time-window waiting test
+description: Verifies that early arrival waits until the customer ready time.
+
+objective: distance
+
+constraints:
+  problem_type: [time_window]
+  split_delivery: false
+
+parameters:
+  seed: 42
+  population_size: 20
+  generations: 50
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  tournament_size: 3
+
+fleet:
+  speed: 1.0
+
+instance:
+  coordinates:
+    0: [0, 0]
+    1: [5, 0]
+  demand:
+    1: 0
+  ready_time:
+    0: 0
+    1: 20
+  due_time:
+    0: 1000
+    1: 40
+  service_time:
+    0: 0
+    1: 0
+
+test_case:
+  route: [0, 1, 0]
+  expected_feasible: true
+  expected_arrival_time: 5
+  expected_service_start_time: 20
+  reason: The vehicle arrives before the time window opens and waits at node 1.

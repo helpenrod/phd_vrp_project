@@ -1,0 +1,54 @@
+name: Capacity and time-window smoke test
+description: Minimal instance combining vehicle capacity and customer time windows.
+
+objective: distance
+
+constraints:
+  problem_type: [capacity, time_window]
+  split_delivery: false
+
+parameters:
+  seed: 42
+  population_size: 20
+  generations: 50
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  tournament_size: 3
+
+fleet:
+  capacity: 10
+  speed: 1.0
+
+instance:
+  coordinates:
+    0: [0, 0]
+    1: [5, 0]
+    2: [15, 0]
+    3: [10, 0]
+  demand:
+    1: 6
+    2: 5
+    3: 4
+  ready_time:
+    0: 0
+    1: 5
+    2: 5
+    3: 5
+  due_time:
+    0: 1000
+    1: 50
+    2: 50
+    3: 50
+  service_time:
+    0: 0
+    1: 0
+    2: 0
+    3: 0
+
+test_case:
+  valid_routes:
+    - [0, 1, 3, 0]
+    - [0, 2, 0]
+  expected_feasible: true
+  expected_route_loads: [10, 5]
+  reason: Total demand exceeds one vehicle capacity, but can be split across two routes while satisfying wide time windows.

@@ -22,7 +22,10 @@ def relocate_mutation(routes, inst):
         return new_routes
     return routes
 
-relocate_mutation.tags = {'capacity', 'time_window'}
+relocate_mutation.required_constraints = set()
+relocate_mutation.forbidden_constraints = {'pickup_delivery'}
+relocate_mutation.compatible_constraints = {'capacity', 'time_window'}
+relocate_mutation.tags = relocate_mutation.compatible_constraints
 
 def swap_mutation(routes, inst):
     """Standard swap: swap two random nodes if feasible."""
@@ -37,7 +40,10 @@ def swap_mutation(routes, inst):
     if inst.is_feasible_routes(new_routes): return new_routes
     return routes
 
-swap_mutation.tags = {'capacity', 'time_window'}
+swap_mutation.required_constraints = set()
+swap_mutation.forbidden_constraints = {'pickup_delivery'}
+swap_mutation.compatible_constraints = {'capacity', 'time_window'}
+swap_mutation.tags = swap_mutation.compatible_constraints
 
 def pd_relocate_mutation(routes, inst):
     """Relocates a random PD-pair (or single node) to its cheapest feasible position."""
@@ -74,7 +80,10 @@ def pd_relocate_mutation(routes, inst):
         
     return new_routes
 
-pd_relocate_mutation.tags = {'capacity', 'time_window', 'pickup_delivery'}
+pd_relocate_mutation.required_constraints = {'pickup_delivery'}
+pd_relocate_mutation.forbidden_constraints = set()
+pd_relocate_mutation.compatible_constraints = {'capacity', 'time_window', 'pickup_delivery'}
+pd_relocate_mutation.tags = pd_relocate_mutation.compatible_constraints
 
 def pd_swap_mutation(routes, inst):
     """PD-Aware swap: Re-inserts two PD-pairs greedily."""
@@ -99,4 +108,7 @@ def pd_swap_mutation(routes, inst):
         else: new_routes.append([p, d])
     return new_routes
 
-pd_swap_mutation.tags = {'capacity', 'time_window', 'pickup_delivery'}
+pd_swap_mutation.required_constraints = {'pickup_delivery'}
+pd_swap_mutation.forbidden_constraints = set()
+pd_swap_mutation.compatible_constraints = {'capacity', 'time_window', 'pickup_delivery'}
+pd_swap_mutation.tags = pd_swap_mutation.compatible_constraints

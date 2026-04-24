@@ -1,0 +1,65 @@
+name: Capacity, time-window, and pickup-delivery smoke test
+description: Minimal instance combining capacity, time windows, and pickup-delivery precedence.
+
+objective: distance
+
+constraints:
+  problem_type: [capacity, time_window, pickup_delivery]
+  split_delivery: false
+
+parameters:
+  seed: 42
+  population_size: 20
+  generations: 50
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  tournament_size: 3
+
+fleet:
+  capacity: 5
+  speed: 1.0
+
+instance:
+  coordinates:
+    0: [0, 0]
+    1: [5, 0]
+    2: [10, 0]
+    3: [20, 0]
+    4: [30, 0]
+  demand:
+    1: 3
+    2: 4
+    3: -3
+    4: -4
+  pickups:
+    1: 3
+    2: 4
+  ready_time:
+    0: 0
+    1: 5
+    2: 10
+    3: 20
+    4: 30
+  due_time:
+    0: 1000
+    1: 20
+    2: 30
+    3: 50
+    4: 60
+  service_time:
+    0: 0
+    1: 0
+    2: 0
+    3: 0
+    4: 0
+
+test_case:
+  valid_route: [0, 1, 3, 2, 4, 0]
+  overload_route: [0, 1, 2, 3, 4, 0]
+  invalid_precedence_route: [0, 3, 1, 2, 4, 0]
+  expected_valid_feasible: true
+  expected_overload_feasible: false
+  expected_invalid_precedence_feasible: false
+  expected_valid_peak_load: 4
+  expected_overload_peak_load: 7
+  reason: The route must satisfy pair precedence, time windows, and capacity 5, so pair 1 must be completed before picking up pair 2.

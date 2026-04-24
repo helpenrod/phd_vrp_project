@@ -9,9 +9,9 @@ def main():
     if len(sys.argv) < 2:
         print("Error: Please provide the path to the problem configuration file.")
         print("Usage: python3 -m core.main path/to/your_problem.yaml")
-        # As an example, use the vrptwc config if none is provided
-        print("\nRunning with default VRPTWC example...")
-        problem_file = "variants/alg3_vrptwc/config.yaml"
+        # As an example, use the PDPTW config if none is provided
+        print("\nRunning with default PDPTW example...")
+        problem_file = "variants/alg4_pdptw/config.yaml"
     else:
         problem_file = sys.argv[1]
 

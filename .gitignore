@@ -1,2 +1,15 @@
 # Ignore development and session notes
 Daily_notes/
+.codex
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Python environments and tool caches
+.venv/
+.pytest_cache/
+
+# Generated experiment output
+experiments/logs/

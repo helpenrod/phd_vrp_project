@@ -79,6 +79,12 @@ def pd_route_based_crossover(p1: list, p2: list, inst) -> list:
 
     return inst.routes_to_chromosome(child_routes)
 
-pd_route_based_crossover.tags = {'capacity', 'time_window', 'pickup_delivery'}
-# Maintain backward compatibility or tag existing as safe if logic allows
-route_based_crossover.tags = {'capacity', 'time_window'}
+route_based_crossover.required_constraints = set()
+route_based_crossover.forbidden_constraints = {'pickup_delivery'}
+route_based_crossover.compatible_constraints = {'capacity', 'time_window'}
+route_based_crossover.tags = route_based_crossover.compatible_constraints
+
+pd_route_based_crossover.required_constraints = {'pickup_delivery'}
+pd_route_based_crossover.forbidden_constraints = set()
+pd_route_based_crossover.compatible_constraints = {'capacity', 'time_window', 'pickup_delivery'}
+pd_route_based_crossover.tags = pd_route_based_crossover.compatible_constraints
