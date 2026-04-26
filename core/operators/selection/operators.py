@@ -11,3 +11,11 @@ def tournament_selection(population: list, k: int, cost_function) -> list:
     scored = [(cost_function(c), c) for c in candidates]
     scored.sort(key=lambda x: x[0])
     return deepcopy(scored[0][1])
+
+
+tournament_selection.stage = "selection"
+tournament_selection.name = "tournament"
+tournament_selection.requires = set()
+tournament_selection.forbids = set()
+tournament_selection.supports = {'capacity', 'time_window', 'pickup_delivery'}
+tournament_selection.representation = "direct_route"

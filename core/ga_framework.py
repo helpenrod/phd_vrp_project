@@ -13,12 +13,29 @@ from core.operators import selection
 DEPOT = 0
 
 class GAFramework:
-    def __init__(self, instance, params: dict):
+    def __init__(
+        self,
+        instance,
+        params: dict = None,
+        config: dict = None,
+        initialization_ops=None,
+        selection_ops=None,
+        crossover_ops=None,
+        mutation_ops=None,
+        repair_ops=None,
+        evaluation_ops=None,
+        replacement_ops=None,
+        termination_ops=None,
+        blueprint=None,
+    ):
         """
         instance: A problem instance object (e.g., CVRPInstance, VRPTWInstance)
                   that provides methods like `total_cost`, `is_feasible`, etc.
         params: A dictionary of GA parameters, including operator selection.
         """
+        if params is None:
+            params = config or {}
+
         self.inst = instance
         self.pop_size = int(params["population_size"])
         self.gens = int(params["generations"])
@@ -26,6 +43,12 @@ class GAFramework:
         self.pm = float(params["mutation_prob"])
         self.tournament_k = int(params["tournament_size"])
         random.seed(int(params["seed"]))
+        self.blueprint = blueprint
+        self.initialization_ops = initialization_ops or []
+        self.repair_ops = repair_ops or []
+        self.evaluation_ops = evaluation_ops or []
+        self.replacement_ops = replacement_ops or []
+        self.termination_ops = termination_ops or []
 
         # --- DYNAMIC OBJECTIVE FUNCTION SELECTION ---
         objective = params.get("objective", "distance").lower()
@@ -41,19 +64,28 @@ class GAFramework:
         ops = params.get("operators", {})
         
         # Dynamic Crossover Selection (Allows HH to inject 'pd_route_based')
-        cx_name = str(ops.get("crossover", "route_based")).lower()
-        self.crossover_op = getattr(crossover, f"{cx_name}_crossover", crossover.route_based_crossover)
+        if crossover_ops:
+            self.crossover_op = crossover_ops[0]
+        else:
+            cx_name = str(ops.get("crossover", "route_based")).lower()
+            self.crossover_op = getattr(crossover, f"{cx_name}_crossover", crossover.route_based_crossover)
 
         # Dynamic Mutation Selection
-        self.mutation_ops = []
-        mutation_names = ops.get("mutation", ["relocate", "swap"])
-        for m_name in mutation_names:
-            op_func = getattr(mutation, f"{m_name}_mutation", None)
-            if op_func:
-                self.mutation_ops.append(op_func)
+        self.mutation_ops = list(mutation_ops or [])
+        if not self.mutation_ops:
+            mutation_names = ops.get("mutation", ["relocate", "swap"])
+            for m_name in mutation_names:
+                op_func = getattr(mutation, f"{m_name}_mutation", None)
+                if op_func:
+                    self.mutation_ops.append(op_func)
+
+        self.selection_op = selection_ops[0] if selection_ops else selection.tournament_selection
 
         # Local Search
-        self.use_2opt = "2opt" in ops.get("local_search", [])
+        if blueprint is not None:
+            self.use_2opt = "2opt" in blueprint.local_search
+        else:
+            self.use_2opt = "2opt" in ops.get("local_search", [])
 
     # ---------- population init ----------
     def _greedy_seed_routes(self, customers):
@@ -101,12 +133,16 @@ class GAFramework:
     # ---------- evaluation ----------
     def evaluate(self, chrom):
         if not self.inst.is_feasible(chrom):
-            chrom = self._repair(chrom)
+            if self.repair_ops:
+                for repair_op in self.repair_ops:
+                    chrom = repair_op(chrom, self)
+            elif self.blueprint is None:
+                chrom = self._repair(chrom)
         return self.cost_function(chrom), chrom
 
     # ---------- selection (delegated) ----------
     def tournament(self, pop):
-        return selection.tournament_selection(pop, self.tournament_k, self.cost_function)
+        return self.selection_op(pop, self.tournament_k, self.cost_function)
 
     # ---------- crossover (delegated) ----------
     def crossover(self, p1, p2):

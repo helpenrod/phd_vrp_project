@@ -26,6 +26,12 @@ relocate_mutation.required_constraints = set()
 relocate_mutation.forbidden_constraints = {'pickup_delivery'}
 relocate_mutation.compatible_constraints = {'capacity', 'time_window'}
 relocate_mutation.tags = relocate_mutation.compatible_constraints
+relocate_mutation.stage = "mutation"
+relocate_mutation.name = "relocate"
+relocate_mutation.requires = relocate_mutation.required_constraints
+relocate_mutation.forbids = relocate_mutation.forbidden_constraints
+relocate_mutation.supports = relocate_mutation.compatible_constraints
+relocate_mutation.representation = "direct_route"
 
 def swap_mutation(routes, inst):
     """Standard swap: swap two random nodes if feasible."""
@@ -44,6 +50,12 @@ swap_mutation.required_constraints = set()
 swap_mutation.forbidden_constraints = {'pickup_delivery'}
 swap_mutation.compatible_constraints = {'capacity', 'time_window'}
 swap_mutation.tags = swap_mutation.compatible_constraints
+swap_mutation.stage = "mutation"
+swap_mutation.name = "swap"
+swap_mutation.requires = swap_mutation.required_constraints
+swap_mutation.forbids = swap_mutation.forbidden_constraints
+swap_mutation.supports = swap_mutation.compatible_constraints
+swap_mutation.representation = "direct_route"
 
 def pd_relocate_mutation(routes, inst):
     """Relocates a random PD-pair (or single node) to its cheapest feasible position."""
@@ -84,6 +96,12 @@ pd_relocate_mutation.required_constraints = {'pickup_delivery'}
 pd_relocate_mutation.forbidden_constraints = set()
 pd_relocate_mutation.compatible_constraints = {'capacity', 'time_window', 'pickup_delivery'}
 pd_relocate_mutation.tags = pd_relocate_mutation.compatible_constraints
+pd_relocate_mutation.stage = "mutation"
+pd_relocate_mutation.name = "pd_relocate"
+pd_relocate_mutation.requires = pd_relocate_mutation.required_constraints
+pd_relocate_mutation.forbids = pd_relocate_mutation.forbidden_constraints
+pd_relocate_mutation.supports = pd_relocate_mutation.compatible_constraints
+pd_relocate_mutation.representation = "direct_route"
 
 def pd_swap_mutation(routes, inst):
     """PD-Aware swap: Re-inserts two PD-pairs greedily."""
@@ -112,3 +130,9 @@ pd_swap_mutation.required_constraints = {'pickup_delivery'}
 pd_swap_mutation.forbidden_constraints = set()
 pd_swap_mutation.compatible_constraints = {'capacity', 'time_window', 'pickup_delivery'}
 pd_swap_mutation.tags = pd_swap_mutation.compatible_constraints
+pd_swap_mutation.stage = "mutation"
+pd_swap_mutation.name = "pd_swap"
+pd_swap_mutation.requires = pd_swap_mutation.required_constraints
+pd_swap_mutation.forbids = pd_swap_mutation.forbidden_constraints
+pd_swap_mutation.supports = pd_swap_mutation.compatible_constraints
+pd_swap_mutation.representation = "direct_route"

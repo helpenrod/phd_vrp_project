@@ -1,14 +1,17 @@
 import json
 import inspect
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from core.ga_framework import GAFramework
 from core.operators import crossover, mutation
 
 # NEW: Import the dynamic instance and primitive constraint checkers
+from core.hyperheuristic.algorithm_builder import AlgorithmBuilder
+from core.hyperheuristic.blueprint import AlgorithmBlueprint, ConstraintSet
+from core.hyperheuristic.component_registry import build_default_registry, is_compatible
 from core.hyperheuristic.dynamic_instance import DynamicInstance
 from core.constraints import capacity, time_window, pickup_delivery
 
@@ -23,6 +26,8 @@ CONSTRAINT_CHECKER_MAP = {
 class HyperHeuristic:
     def __init__(self):
         self.available_operators = self._discover_operators()
+        self.registry = build_default_registry()
+        self.builder = AlgorithmBuilder(self.registry)
         self.last_selection_report = {}
 
     def _operator_metadata(self, func):
@@ -84,6 +89,9 @@ class HyperHeuristic:
                 "(e.g., ['capacity', 'time_window'])"
             )
         return problem_constraints
+
+    def _build_constraint_set(self, config):
+        return ConstraintSet(self._detect_constraints(config))
 
     def _validate_problem_definition(self, config, problem_constraints):
         unknown_constraints = problem_constraints.difference(CONSTRAINT_CHECKER_MAP)
@@ -168,8 +176,24 @@ class HyperHeuristic:
         Selects operators from the available pool that are compatible
         with the given problem constraints.
         """
-        selected = {'crossover': None, 'mutation': []}
-        selection_report = {'crossover': [], 'mutation': []}
+        selected = {
+            'selection': ['tournament'],
+            'crossover': None,
+            'mutation': [],
+            'repair': ['greedy_repair'],
+        }
+        selection_report = {
+            'selection': [{
+                'name': 'tournament',
+                'reasons': ['default parent selection for generated GA solvers'],
+            }],
+            'crossover': [],
+            'mutation': [],
+            'repair': [{
+                'name': 'greedy_repair',
+                'reasons': ['default insertion-based repair for generated GA solvers'],
+            }],
+        }
         problem_constraints = set(problem_constraints)
 
         # Select the first compatible crossover operator
@@ -209,6 +233,68 @@ class HyperHeuristic:
         self.last_selection_report = selection_report
         return selected
 
+    def generate_blueprint(self, constraint_set):
+        representation = "direct_route"
+        blueprint = AlgorithmBlueprint(representation=representation)
+
+        for stage in blueprint.__dict__.keys():
+            if stage == "representation":
+                continue
+
+            candidates = self.registry.get_stage(stage)
+            compatible = [
+                component for component in candidates
+                if is_compatible(component, constraint_set, representation)
+            ]
+
+            if stage == "mutation":
+                setattr(blueprint, stage, [component.name for component in compatible])
+            elif compatible:
+                setattr(blueprint, stage, [compatible[0].name])
+
+        blueprint.initialization = ["greedy_seed"]
+        blueprint.evaluation = ["objective_cost"]
+        blueprint.replacement = ["generational"]
+        blueprint.termination = ["fixed_generations"]
+        blueprint.local_search = ["2opt"]
+        return blueprint
+
+    def generate_candidate_blueprints(self, constraint_set, limit=5):
+        base = self.generate_blueprint(constraint_set)
+        candidates = [base]
+
+        for mutation_name in base.mutation:
+            candidate = deepcopy(base)
+            candidate.mutation = [mutation_name]
+            candidates.append(candidate)
+
+        no_local_search = deepcopy(base)
+        no_local_search.local_search = []
+        candidates.append(no_local_search)
+
+        no_repair = deepcopy(base)
+        no_repair.repair = []
+        candidates.append(no_repair)
+
+        unique_candidates = []
+        seen = set()
+        for candidate in candidates:
+            fingerprint = json.dumps(candidate.to_dict(), sort_keys=True)
+            if fingerprint not in seen:
+                seen.add(fingerprint)
+                unique_candidates.append(candidate)
+
+        return unique_candidates[:limit]
+
+    def _selected_ops_from_blueprint(self, blueprint):
+        return {
+            "selection": blueprint.selection,
+            "crossover": blueprint.crossover[0] if blueprint.crossover else None,
+            "mutation": blueprint.mutation,
+            "repair": blueprint.repair,
+            "local_search": blueprint.local_search,
+        }
+
     def _build_constraint_checkers(self, problem_constraints):
         checkers_to_inject = []
         for constraint in problem_constraints:
@@ -216,20 +302,15 @@ class HyperHeuristic:
             checkers_to_inject.append(checker_func)
         return checkers_to_inject
 
-    def _assemble_solver(self, config, selected_ops, checkers_to_inject):
+    def _assemble_solver(self, config, blueprint, checkers_to_inject):
         inst = DynamicInstance(config, checkers_to_inject)
-
-        ga_params = dict(config['parameters'])
-        ga_params['operators'] = selected_ops
-        ga_params['objective'] = config.get('objective', 'distance')
-
-        return inst, GAFramework(inst, ga_params)
+        return inst, self.builder.build(blueprint, inst, config)
 
     def _report_operator_selection(self, selected_ops, selection_report):
         print(f"HH: Selected operators: {selected_ops}")
         print("HH: Operator selection rationale:")
 
-        for operator_type in ('crossover', 'mutation', 'local_search'):
+        for operator_type in ('selection', 'crossover', 'mutation', 'repair', 'local_search'):
             for entry in selection_report.get(operator_type, []):
                 reason_text = "; ".join(entry['reasons'])
                 print(f"  - {operator_type}.{entry['name']}: {reason_text}")
@@ -240,11 +321,13 @@ class HyperHeuristic:
         config,
         problem_constraints,
         selected_ops,
+        blueprint,
         checkers_to_inject,
         inst,
         best_solution,
         best_cost,
         runtime_seconds,
+        experiment_label=None,
     ):
         log_dir = Path("experiments/logs")
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -261,8 +344,11 @@ class HyperHeuristic:
             "timestamp_utc": timestamp,
             "config_path": str(problem_config_path),
             "problem_name": config.get("name"),
+            "experiment_label": experiment_label,
             "constraints": sorted(problem_constraints),
             "selected_operators": selected_ops,
+            "blueprint": blueprint.to_dict(),
+            "algorithm_blueprint": blueprint.to_dict(),
             "operator_selection_report": self.last_selection_report,
             "constraint_checkers": [checker.__name__ for checker in checkers_to_inject],
             "seed": config.get("parameters", {}).get("seed"),
@@ -287,19 +373,24 @@ class HyperHeuristic:
         start_time = time.perf_counter()
         config = self._load_config(problem_config_path)
 
-        problem_constraints = self._detect_constraints(config)
+        constraint_set = self._build_constraint_set(config)
+        problem_constraints = constraint_set.constraints
         print(f"HH: Detected constraints: {list(problem_constraints)}")
 
         self._validate_problem_definition(config, problem_constraints)
         print("HH: Problem definition validated.")
 
-        selected_ops = self._select_operators(problem_constraints)
+        blueprint = self.generate_blueprint(constraint_set)
+        print(f"HH: Generated algorithm blueprint: {blueprint.to_dict()}")
+
+        selected_ops = self._selected_ops_from_blueprint(blueprint)
+        self._select_operators(problem_constraints)
         self._report_operator_selection(selected_ops, self.last_selection_report)
 
         checkers_to_inject = self._build_constraint_checkers(problem_constraints)
         print(f"HH: Generating instance with checkers: {[c.__name__ for c in checkers_to_inject]}")
 
-        inst, ga = self._assemble_solver(config, selected_ops, checkers_to_inject)
+        inst, ga = self._assemble_solver(config, blueprint, checkers_to_inject)
         print("HH: Solver assembled.")
         best_solution, best_cost = ga.run()
         runtime_seconds = time.perf_counter() - start_time
@@ -309,6 +400,7 @@ class HyperHeuristic:
             config,
             problem_constraints,
             selected_ops,
+            blueprint,
             checkers_to_inject,
             inst,
             best_solution,
