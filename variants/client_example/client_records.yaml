@@ -1,0 +1,44 @@
+constraints:
+  problem_type: ["capacity", "time_window"]
+
+fleet:
+  capacity: 10
+  speed: 1.0
+
+objective: "distance"
+
+depot: 0
+
+coordinates:
+  0: [0, 0]
+  1: [1, 1]
+  2: [2, 2]
+  3: [-1, -1]
+
+demand:
+  0: 0
+  1: 1
+  2: 2
+  3: 1
+
+ready_time:
+  0: 0
+  1: 0
+  2: 0
+  3: 0
+
+due_time:
+  0: 1000
+  1: 1000
+  2: 1000
+  3: 1000
+
+service_time:
+  0: 0
+  1: 0
+  2: 0
+  3: 0
+
+previous_routes:
+  - [1, 2]
+  - [3]

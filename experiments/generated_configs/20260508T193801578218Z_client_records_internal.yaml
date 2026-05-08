@@ -1,0 +1,67 @@
+constraints:
+  problem_type:
+  - capacity
+  - time_window
+fleet:
+  capacity: 10
+  speed: 1.0
+objective: distance
+instance:
+  coordinates: &id001
+    0:
+    - 0
+    - 0
+    1:
+    - 1
+    - 1
+    2:
+    - 2
+    - 2
+    3:
+    - -1
+    - -1
+  demand: &id002
+    0: 0
+    1: 1
+    2: 2
+    3: 1
+  ready_time: &id003
+    0: 0
+    1: 0
+    2: 0
+    3: 0
+  due_time: &id004
+    0: 1000
+    1: 1000
+    2: 1000
+    3: 1000
+  service_time: &id005
+    0: 0
+    1: 0
+    2: 0
+    3: 0
+data:
+  depot: 0
+  coordinates: *id001
+  demand: *id002
+  ready_time: *id003
+  due_time: *id004
+  service_time: *id005
+  previous_routes:
+  - - 1
+    - 2
+  - - 3
+parameters:
+  population_size: 20
+  generations: 50
+  crossover_prob: 0.8
+  mutation_prob: 0.1
+  tournament_size: 3
+  seed: 42
+aco:
+  n_ants: 4
+  n_iterations: 5
+  n_repetitions: 2
+  evaporation_rate: 0.2
+  alpha: 1.0
+  beta: 1.0

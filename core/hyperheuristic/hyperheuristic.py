@@ -9,9 +9,14 @@ import yaml
 from core.operators import crossover, mutation
 
 # NEW: Import the dynamic instance and primitive constraint checkers
+from core.data import HistoricalDataLoader
+from core.data.client_config_adapter import normalize_client_config
+from core.hyperheuristic.aco_config_search import ACOConfigSearch
 from core.hyperheuristic.algorithm_builder import AlgorithmBuilder
 from core.hyperheuristic.blueprint import AlgorithmBlueprint, ConstraintSet
 from core.hyperheuristic.component_registry import build_default_registry, is_compatible
+from core.hyperheuristic.configuration_evaluator import ConfigurationEvaluator
+from core.hyperheuristic.configuration_space import build_compatible_configuration_space
 from core.hyperheuristic.dynamic_instance import DynamicInstance
 from core.constraints import capacity, time_window, pickup_delivery
 
@@ -82,7 +87,11 @@ class HyperHeuristic:
 
     def _detect_constraints(self, config):
         constraints_config = config.get('constraints', {})
-        problem_constraints = frozenset(constraints_config.get('problem_type', []))
+        if isinstance(constraints_config, dict):
+            constraints = constraints_config.get('problem_type', [])
+        else:
+            constraints = constraints_config or []
+        problem_constraints = frozenset(constraints)
         if not problem_constraints:
             raise ValueError(
                 "Problem file must specify a 'constraints.problem_type' list "
@@ -306,6 +315,92 @@ class HyperHeuristic:
         inst = DynamicInstance(config, checkers_to_inject)
         return inst, self.builder.build(blueprint, inst, config)
 
+    def _save_generated_internal_config(self, problem_config_path, config):
+        output_dir = Path("experiments/generated_configs")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        config_stem = Path(problem_config_path).stem
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        output_path = output_dir / f"{timestamp}_{config_stem}_internal.yaml"
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+
+        return output_path
+
+    def _merge_route_history_into_config(self, config, route_history):
+        merged_config = deepcopy(config)
+        instance_config = merged_config.setdefault('instance', {})
+        fleet_config = merged_config.setdefault('fleet', {})
+
+        instance_config.setdefault('coordinates', {
+            node: list(coords) for node, coords in route_history.coordinates.items()
+        })
+        if route_history.demands is not None:
+            instance_config.setdefault('demand', dict(route_history.demands))
+        if route_history.time_windows is not None:
+            instance_config.setdefault(
+                'ready_time',
+                {node: window[0] for node, window in route_history.time_windows.items()},
+            )
+            instance_config.setdefault(
+                'due_time',
+                {node: window[1] for node, window in route_history.time_windows.items()},
+            )
+        if route_history.service_times is not None:
+            instance_config.setdefault('service_time', dict(route_history.service_times))
+        if route_history.pickup_delivery_pairs is not None:
+            instance_config.setdefault(
+                'pickup_delivery_pairs',
+                [
+                    {'pickup': pickup, 'delivery': delivery}
+                    for pickup, delivery in route_history.pickup_delivery_pairs
+                ],
+            )
+
+        metadata = route_history.metadata or {}
+        fleet_metadata = metadata.get('fleet', {})
+        if isinstance(fleet_metadata, dict):
+            for key, value in fleet_metadata.items():
+                fleet_config.setdefault(key, value)
+        if 'vehicle_capacity' in metadata:
+            fleet_config.setdefault('capacity', metadata['vehicle_capacity'])
+        if 'capacity' in metadata:
+            fleet_config.setdefault('capacity', metadata['capacity'])
+
+        return merged_config
+
+    @staticmethod
+    def _selected_ops_from_ga_config(ga_config):
+        return {
+            "selection": [ga_config.get("selection", "tournament")],
+            "crossover": ga_config.get("crossover"),
+            "mutation": [ga_config.get("mutation")]
+            if isinstance(ga_config.get("mutation"), str)
+            else ga_config.get("mutation", []),
+            "repair": ga_config.get("repair", []),
+            "local_search": ga_config.get("local_search", []),
+        }
+
+    @staticmethod
+    def _blueprint_from_ga_config(ga_config):
+        mutation = ga_config.get("mutation", [])
+        if isinstance(mutation, str):
+            mutation = [mutation]
+
+        return AlgorithmBlueprint(
+            representation="direct_route",
+            initialization=["greedy_seed"],
+            selection=[ga_config.get("selection", "tournament")],
+            crossover=[ga_config.get("crossover")],
+            mutation=mutation,
+            repair=ga_config.get("repair", []),
+            local_search=ga_config.get("local_search", []),
+            evaluation=["objective_cost"],
+            replacement=["generational"],
+            termination=["fixed_generations"],
+        )
+
     def _report_operator_selection(self, selected_ops, selection_report):
         print(f"HH: Selected operators: {selected_ops}")
         print("HH: Operator selection rationale:")
@@ -328,6 +423,7 @@ class HyperHeuristic:
         best_cost,
         runtime_seconds,
         experiment_label=None,
+        extra_log_data=None,
     ):
         log_dir = Path("experiments/logs")
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -359,11 +455,90 @@ class HyperHeuristic:
             "best_route_strings": route_strings,
             "feasible": feasible,
         }
+        if extra_log_data:
+            log_data.update(extra_log_data)
 
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(log_data, f, indent=2)
 
         return log_path
+
+    def _solve_with_data_driven_aco(
+        self,
+        problem_config_path,
+        config,
+        problem_constraints,
+        checkers_to_inject,
+        start_time,
+        route_history,
+    ):
+        print("HH: Historical data found; activating ACO configuration search.")
+        inst = DynamicInstance(config, checkers_to_inject)
+        parameters = config.get("parameters", {})
+        aco_settings = config.get("aco", {})
+
+        configuration_space = build_compatible_configuration_space(
+            problem_constraints,
+            base_parameters=parameters,
+        )
+        evaluator = ConfigurationEvaluator(
+            inst,
+            list(problem_constraints),
+            objective=config.get("objective", "distance"),
+            n_repetitions=aco_settings.get("n_repetitions", 5),
+            base_seed=parameters.get("seed", 42),
+        )
+        aco = ACOConfigSearch(
+            configuration_space,
+            evaluator,
+            n_ants=aco_settings.get("n_ants", 10),
+            n_iterations=aco_settings.get("n_iterations", 20),
+            evaporation_rate=aco_settings.get("evaporation_rate", 0.2),
+            alpha=aco_settings.get("alpha", 1.0),
+            beta=aco_settings.get("beta", 1.0),
+            seed=parameters.get("seed"),
+        )
+
+        search_result = aco.run()
+        best_config = search_result["best_configuration"]
+        best_evaluation = search_result["best_evaluation"]
+        best_result = best_evaluation["best_result"]
+        best_solution = best_result["best_solution"]
+        best_cost = best_result["best_cost"]
+        runtime_seconds = time.perf_counter() - start_time
+
+        blueprint = self._blueprint_from_ga_config(best_config)
+        selected_ops = self._selected_ops_from_ga_config(best_config)
+        aco_metrics = {
+            key: value for key, value in best_evaluation.items()
+            if key not in {"results", "best_result"}
+        }
+
+        log_path = self._log_experiment(
+            problem_config_path,
+            config,
+            problem_constraints,
+            selected_ops,
+            blueprint,
+            checkers_to_inject,
+            inst,
+            best_solution,
+            best_cost,
+            runtime_seconds,
+            experiment_label="data_driven_aco",
+            extra_log_data={
+                "mode": "data_driven_aco",
+                "aco_best_configuration": best_config,
+                "aco_best_metrics": aco_metrics,
+                "aco_history": search_result["history"],
+                "historical_data_metadata": route_history.metadata or {},
+            },
+        )
+        print(f"HH: Best ACO GA configuration: {best_config}")
+        print(f"HH: Best ACO score: {best_evaluation['score']:.4f}")
+        print(f"HH: Experiment log saved to {log_path}")
+
+        return inst, best_solution, best_cost
 
     def solve(self, problem_config_path: str):
         """
@@ -372,6 +547,16 @@ class HyperHeuristic:
         """
         start_time = time.perf_counter()
         config = self._load_config(problem_config_path)
+        config, generated_internal_config = normalize_client_config(config)
+        if generated_internal_config:
+            generated_path = self._save_generated_internal_config(problem_config_path, config)
+            print(f"HH: Generated internal solver config saved to {generated_path}")
+
+        data_loader = HistoricalDataLoader(config, base_path=Path(problem_config_path).parent)
+        route_history = None
+        if data_loader.has_historical_data():
+            route_history = data_loader.load()
+            config = self._merge_route_history_into_config(config, route_history)
 
         constraint_set = self._build_constraint_set(config)
         problem_constraints = constraint_set.constraints
@@ -389,6 +574,16 @@ class HyperHeuristic:
 
         checkers_to_inject = self._build_constraint_checkers(problem_constraints)
         print(f"HH: Generating instance with checkers: {[c.__name__ for c in checkers_to_inject]}")
+
+        if route_history is not None:
+            return self._solve_with_data_driven_aco(
+                problem_config_path,
+                config,
+                problem_constraints,
+                checkers_to_inject,
+                start_time,
+                route_history,
+            )
 
         inst, ga = self._assemble_solver(config, blueprint, checkers_to_inject)
         print("HH: Solver assembled.")

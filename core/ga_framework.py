@@ -3,12 +3,14 @@
 # It is configured by a `params` dictionary and uses an `instance` object for
 # all problem-specific operations (cost, feasibility, etc.).
 import random
+import time
 from copy import deepcopy
 
 # Import the operator packages. The __init__.py files make the functions available.
 from core.operators import crossover
 from core.operators import mutation
 from core.operators import selection
+from core.hyperheuristic.component_registry import build_default_registry
 
 DEPOT = 0
 
@@ -258,3 +260,83 @@ class GAFramework:
                 print(f"Gen {g}: best cost = {best_fit:.2f}")
 
         return best, best_fit
+
+
+class GARunner:
+    def __init__(
+        self,
+        instance,
+        constraints: list[str],
+        ga_config: dict,
+        seed: int | None = None,
+    ):
+        self.instance = instance
+        self.constraints = list(constraints)
+        self.ga_config = dict(ga_config)
+        self.seed = seed
+        self.registry = build_default_registry()
+
+    def run(self) -> dict:
+        params = self._framework_params()
+        ga = GAFramework(
+            instance=self.instance,
+            params=params,
+            selection_ops=self._resolve("selection", [self.ga_config.get("selection", "tournament")]),
+            crossover_ops=self._resolve("crossover", [self.ga_config["crossover"]]),
+            mutation_ops=self._resolve("mutation", self._as_list(self.ga_config["mutation"])),
+            repair_ops=self._resolve("repair", self._as_list(self.ga_config.get("repair", []))),
+        )
+
+        start_time = time.perf_counter()
+        best_solution, best_cost = ga.run()
+        runtime = time.perf_counter() - start_time
+
+        return {
+            "best_solution": best_solution,
+            "best_cost": float(best_cost),
+            "is_feasible": self.instance.is_feasible(best_solution),
+            "runtime": runtime,
+            "history": [],
+            "ga_config": dict(self.ga_config),
+        }
+
+    def _framework_params(self) -> dict:
+        seed = self.seed if self.seed is not None else self.ga_config.get("seed", 42)
+        local_search = self._normalize_local_search(self.ga_config.get("local_search", []))
+
+        return {
+            "population_size": int(self.ga_config.get("population_size", 50)),
+            "generations": int(self.ga_config.get("generations", 100)),
+            "crossover_prob": float(self.ga_config.get("crossover_prob", 0.8)),
+            "mutation_prob": float(self.ga_config.get("mutation_prob", 0.1)),
+            "tournament_size": int(self.ga_config.get("tournament_size", 3)),
+            "seed": int(seed),
+            "objective": self.ga_config.get("objective", "distance"),
+            "operators": {
+                "crossover": self.ga_config.get("crossover"),
+                "mutation": self._as_list(self.ga_config.get("mutation", [])),
+                "local_search": local_search,
+            },
+        }
+
+    def _resolve(self, stage: str, names: list[str]):
+        if not names:
+            return []
+        return self.registry.resolve(stage, names)
+
+    @staticmethod
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if value == "none":
+            return []
+        return [value]
+
+    @staticmethod
+    def _normalize_local_search(value):
+        names = GARunner._as_list(value)
+        return ["2opt" if name in {"two_opt", "2-opt"} else name for name in names]
