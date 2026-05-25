@@ -45,6 +45,7 @@ class GAFramework:
         self.pm = float(params["mutation_prob"])
         self.tournament_k = int(params["tournament_size"])
         random.seed(int(params["seed"]))
+        self.verbose = bool(params.get("verbose", True))
         self.blueprint = blueprint
         self.initialization_ops = initialization_ops or []
         self.repair_ops = repair_ops or []
@@ -256,7 +257,7 @@ class GAFramework:
                 best_fit = scores[cur_idx]
                 best = deepcopy(pop[cur_idx])
 
-            if g % 20 == 0:
+            if self.verbose and g % 20 == 0:
                 print(f"Gen {g}: best cost = {best_fit:.2f}")
 
         return best, best_fit
@@ -312,6 +313,7 @@ class GARunner:
             "tournament_size": int(self.ga_config.get("tournament_size", 3)),
             "seed": int(seed),
             "objective": self.ga_config.get("objective", "distance"),
+            "verbose": bool(self.ga_config.get("verbose", False)),
             "operators": {
                 "crossover": self.ga_config.get("crossover"),
                 "mutation": self._as_list(self.ga_config.get("mutation", [])),

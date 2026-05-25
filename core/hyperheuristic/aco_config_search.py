@@ -33,30 +33,65 @@ class ACOConfigSearch:
 
         for iteration in range(self.n_iterations):
             iteration_results = []
+            print(self._iteration_separator(iteration))
 
-            for _ in range(self.n_ants):
+            for ant_idx in range(self.n_ants):
                 internal_config = self._construct_internal_configuration()
                 ga_config = self._to_ga_config(internal_config)
+                print(
+                    f"ACO iteration {iteration + 1}/{self.n_iterations} | "
+                    f"ant {ant_idx + 1}/{self.n_ants} | "
+                    f"testing {self._format_configuration(ga_config)}"
+                )
                 evaluation = self.evaluator.evaluate(ga_config)
                 iteration_results.append({
                     "configuration": ga_config,
                     "internal_configuration": internal_config,
                     "evaluation": evaluation,
                 })
+                print(
+                    f"  result: score={evaluation['score']:.4f}, "
+                    f"mean_cost={evaluation['mean_cost']:.4f}, "
+                    f"best_cost={evaluation['best_cost']:.4f}, "
+                    f"feasible_rate={evaluation['mean_feasibility_rate']:.2f}, "
+                    f"mean_runtime={evaluation['mean_runtime']:.4f}s"
+                )
 
                 if best_evaluation is None or evaluation["score"] < best_evaluation["score"]:
                     best_configuration = ga_config
                     best_evaluation = evaluation
+                    print("  new best configuration found")
 
             self.pheromones.evaporate(self.evaporation_rate)
             for result in iteration_results:
                 reward = self._reward(result["evaluation"]["score"])
                 self.pheromones.reinforce(result["internal_configuration"], reward)
 
+            iteration_best = min(
+                iteration_results,
+                key=lambda result: result["evaluation"]["score"],
+            )
+            print(
+                f"ACO iteration {iteration + 1} best: "
+                f"score={iteration_best['evaluation']['score']:.4f} | "
+                f"{self._format_configuration(iteration_best['configuration'])}"
+            )
+
             history.append({
                 "iteration": iteration,
                 "best_score": best_evaluation["score"],
                 "best_configuration": dict(best_configuration),
+                "tested_configurations": [
+                    {
+                        "configuration": dict(result["configuration"]),
+                        "score": result["evaluation"]["score"],
+                        "mean_cost": result["evaluation"]["mean_cost"],
+                        "best_cost": result["evaluation"]["best_cost"],
+                        "mean_feasibility_rate": result["evaluation"]["mean_feasibility_rate"],
+                        "mean_runtime": result["evaluation"]["mean_runtime"],
+                    }
+                    for result in iteration_results
+                ],
             })
 
         return {
@@ -105,3 +140,34 @@ class ACOConfigSearch:
         if not math.isfinite(score):
             return 0.0
         return 1.0 / (1.0 + max(score, 0.0))
+
+    def _iteration_separator(self, iteration: int) -> str:
+        return (
+            "\n"
+            + "=" * 80
+            + "\n"
+            + f"ACO ITERATION {iteration + 1}/{self.n_iterations}: comparing GA configurations"
+            + "\n"
+            + "=" * 80
+        )
+
+    @staticmethod
+    def _format_configuration(configuration: dict) -> str:
+        fields = [
+            "selection",
+            "crossover",
+            "mutation",
+            "repair",
+            "local_search",
+            "population_size",
+            "generations",
+            "crossover_prob",
+            "mutation_prob",
+            "tournament_size",
+            "penalty_weight",
+        ]
+        return ", ".join(
+            f"{field}={configuration[field]}"
+            for field in fields
+            if field in configuration
+        )

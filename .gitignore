@@ -1,5 +1,6 @@
 # Ignore development and session notes
 Daily_notes/
+diagrams/
 .codex
 
 # Python generated files
