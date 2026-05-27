@@ -9,6 +9,7 @@ class ACOConfigSearch:
         self,
         configuration_space: dict,
         evaluator,
+        heuristic_model=None,
         n_ants: int = 10,
         n_iterations: int = 20,
         evaporation_rate: float = 0.2,
@@ -18,6 +19,7 @@ class ACOConfigSearch:
     ):
         self.configuration_space = configuration_space
         self.evaluator = evaluator
+        self.heuristic_model = heuristic_model
         self.n_ants = int(n_ants)
         self.n_iterations = int(n_iterations)
         self.evaporation_rate = float(evaporation_rate)
@@ -111,7 +113,11 @@ class ACOConfigSearch:
         weights = []
         for value in values:
             pheromone = self.pheromones.get(decision, value)
-            heuristic = 1.0
+            if self.heuristic_model is None:
+                heuristic = 1.0
+            else:
+                heuristic = self.heuristic_model.get_eta(decision, value)
+            heuristic = max(float(heuristic), 1e-9)
             weights.append((pheromone ** self.alpha) * (heuristic ** self.beta))
 
         total = sum(weights)

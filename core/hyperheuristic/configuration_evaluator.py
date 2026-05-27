@@ -10,12 +10,18 @@ class ConfigurationEvaluator:
         objective: str = "distance",
         n_repetitions: int = 5,
         base_seed: int = 42,
+        historical_routes: list[list[int]] | None = None,
+        historical_seed_fraction: float = 0.0,
+        historical_variants_per_seed: int = 2,
     ):
         self.instance = instance
         self.constraints = list(constraints)
         self.objective = objective
         self.n_repetitions = int(n_repetitions)
         self.base_seed = int(base_seed)
+        self.historical_routes = historical_routes
+        self.historical_seed_fraction = float(historical_seed_fraction)
+        self.historical_variants_per_seed = int(historical_variants_per_seed)
 
     def evaluate(self, ga_config: dict) -> dict:
         results = []
@@ -24,6 +30,10 @@ class ConfigurationEvaluator:
             seed = self.base_seed + repetition
             run_config = dict(ga_config)
             run_config["objective"] = self.objective
+            if self.historical_routes:
+                run_config["historical_routes"] = self.historical_routes
+                run_config["historical_seed_fraction"] = self.historical_seed_fraction
+                run_config["historical_variants_per_seed"] = self.historical_variants_per_seed
             runner = GARunner(
                 self.instance,
                 self.constraints,

@@ -130,6 +130,15 @@ class HistoricalDataLoader:
         if previous_routes is not None:
             previous_routes = [[int(node) for node in route] for route in previous_routes]
 
+        previous_route_sets = data.get("previous_route_sets")
+        if previous_route_sets is not None:
+            previous_route_sets = [
+                [[int(node) for node in route] for route in route_set]
+                for route_set in previous_route_sets
+            ]
+        elif previous_routes is not None:
+            previous_route_sets = [previous_routes]
+
         metadata = dict(data.get("metadata") or {})
         for key in ("capacity", "vehicle_capacity", "fleet"):
             if key in data:
@@ -143,6 +152,7 @@ class HistoricalDataLoader:
             service_times=service_times,
             pickup_delivery_pairs=pickup_delivery_pairs,
             previous_routes=previous_routes,
+            previous_route_sets=previous_route_sets,
             metadata=metadata,
         )
 

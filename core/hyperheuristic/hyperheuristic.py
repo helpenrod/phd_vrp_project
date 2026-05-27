@@ -9,7 +9,7 @@ import yaml
 from core.operators import crossover, mutation
 
 # NEW: Import the dynamic instance and primitive constraint checkers
-from core.data import HistoricalDataLoader
+from core.data import HistoricalDataLoader, HistoricalMetrics
 from core.data.client_config_adapter import normalize_client_config
 from core.hyperheuristic.aco_config_search import ACOConfigSearch
 from core.hyperheuristic.algorithm_builder import AlgorithmBuilder
@@ -18,6 +18,7 @@ from core.hyperheuristic.component_registry import build_default_registry, is_co
 from core.hyperheuristic.configuration_evaluator import ConfigurationEvaluator
 from core.hyperheuristic.configuration_space import build_compatible_configuration_space
 from core.hyperheuristic.dynamic_instance import DynamicInstance
+from core.hyperheuristic.historical_heuristic_model import HistoricalHeuristicModel
 from core.constraints import capacity, time_window, pickup_delivery
 
 # NEW: Map constraint names to their primitive checker functions.
@@ -27,6 +28,16 @@ CONSTRAINT_CHECKER_MAP = {
     'time_window': time_window.check_time_windows,
     'pickup_delivery': pickup_delivery.check_pickup_delivery,
 }
+
+HISTORICAL_OPTION_DEFAULTS = {
+    "use_as_seeds": True,
+    "seed_fraction": 0.25,
+    "variants_per_seed": 2,
+    "compute_baseline": True,
+    "use_heuristic_for_aco": True,
+}
+
+HISTORICAL_OPTION_KEYS = set(HISTORICAL_OPTION_DEFAULTS)
 
 class HyperHeuristic:
     def __init__(self):
@@ -463,6 +474,57 @@ class HyperHeuristic:
 
         return log_path
 
+    def _historical_options(self, config):
+        options = dict(HISTORICAL_OPTION_DEFAULTS)
+
+        for section_name in ("historical_data", "data", "historical_options"):
+            section = config.get(section_name)
+            if isinstance(section, dict):
+                for key in HISTORICAL_OPTION_KEYS:
+                    if key in section:
+                        options[key] = section[key]
+
+        options["use_as_seeds"] = bool(options["use_as_seeds"])
+        options["compute_baseline"] = bool(options["compute_baseline"])
+        options["use_heuristic_for_aco"] = bool(options["use_heuristic_for_aco"])
+        options["seed_fraction"] = float(options["seed_fraction"])
+        options["variants_per_seed"] = int(options["variants_per_seed"])
+        return options
+
+    def _save_historical_outputs(
+        self,
+        problem_config_path,
+        comparison=None,
+        metrics=None,
+        heuristic_values=None,
+    ):
+        if comparison is None and metrics is None and heuristic_values is None:
+            return None
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        config_stem = Path(problem_config_path).stem
+        output_dir = Path("results") / f"{timestamp}_{config_stem}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        paths = {}
+        payloads = {
+            "historical_comparison": comparison,
+            "historical_metrics": metrics,
+            "aco_heuristic_values": heuristic_values,
+        }
+        for name, payload in payloads.items():
+            if payload is None:
+                continue
+            path = output_dir / f"{name}.yaml"
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, sort_keys=False)
+            paths[name] = str(path)
+
+        return {
+            "directory": str(output_dir),
+            "files": paths,
+        }
+
     def _solve_with_data_driven_aco(
         self,
         problem_config_path,
@@ -476,21 +538,68 @@ class HyperHeuristic:
         inst = DynamicInstance(config, checkers_to_inject)
         parameters = config.get("parameters", {})
         aco_settings = config.get("aco", {})
+        historical_options = self._historical_options(config)
+        previous_routes = (
+            route_history.previous_route_sets
+            or ([route_history.previous_routes] if route_history.previous_routes else [])
+        )
+        use_historical_seeds = bool(
+            previous_routes and historical_options["use_as_seeds"]
+        )
+
+        historical_metrics = None
+        historical_comparison = None
+        heuristic_model = None
+        heuristic_values = None
+        metrics_calculator = HistoricalMetrics(inst, list(problem_constraints))
+
+        if previous_routes:
+            historical_metrics = metrics_calculator.extract_metrics(previous_routes)
+
+        if (
+            previous_routes
+            and historical_options["use_heuristic_for_aco"]
+            and historical_metrics is not None
+        ):
+            heuristic_model = HistoricalHeuristicModel(
+                historical_metrics=historical_metrics,
+                constraints=list(problem_constraints),
+            )
 
         configuration_space = build_compatible_configuration_space(
             problem_constraints,
             base_parameters=parameters,
         )
+        if heuristic_model is not None:
+            heuristic_values = heuristic_model.snapshot(configuration_space)
+
+        print("Historical routes detected: yes")
+        print(
+            "Historical routes used as GA seeds: "
+            f"{'yes' if use_historical_seeds else 'no'}"
+        )
+        print(
+            "ACO heuristic model: "
+            f"{'enabled' if heuristic_model is not None else 'disabled'}"
+        )
+        print(f"ACO beta: {float(aco_settings.get('beta', 1.0))}")
+
         evaluator = ConfigurationEvaluator(
             inst,
             list(problem_constraints),
             objective=config.get("objective", "distance"),
             n_repetitions=aco_settings.get("n_repetitions", 5),
             base_seed=parameters.get("seed", 42),
+            historical_routes=previous_routes if use_historical_seeds else None,
+            historical_seed_fraction=historical_options["seed_fraction"]
+            if use_historical_seeds
+            else 0.0,
+            historical_variants_per_seed=historical_options["variants_per_seed"],
         )
         aco = ACOConfigSearch(
             configuration_space,
             evaluator,
+            heuristic_model=heuristic_model,
             n_ants=aco_settings.get("n_ants", 10),
             n_iterations=aco_settings.get("n_iterations", 20),
             evaporation_rate=aco_settings.get("evaporation_rate", 0.2),
@@ -506,6 +615,34 @@ class HyperHeuristic:
         best_solution = best_result["best_solution"]
         best_cost = best_result["best_cost"]
         runtime_seconds = time.perf_counter() - start_time
+
+        if previous_routes and historical_options["compute_baseline"]:
+            historical_cost = (
+                historical_metrics["historical_cost"]
+                if historical_metrics is not None
+                else metrics_calculator.compute_total_cost(previous_routes)
+            )
+            historical_comparison = metrics_calculator.compute_improvement(
+                historical_cost,
+                best_cost,
+            )
+            historical_comparison["historical_feasibility"] = (
+                metrics_calculator.compute_feasibility_summary(previous_routes)
+            )
+            print(f"Historical route cost: {historical_cost:.2f}")
+            print(f"Generated solution cost: {float(best_cost):.2f}")
+            if historical_comparison["percent_improvement"] is not None:
+                print(
+                    "Improvement over historical routes: "
+                    f"{historical_comparison['percent_improvement']:.2f}%"
+                )
+
+        historical_outputs = self._save_historical_outputs(
+            problem_config_path,
+            comparison=historical_comparison,
+            metrics=historical_metrics,
+            heuristic_values=heuristic_values,
+        )
 
         blueprint = self._blueprint_from_ga_config(best_config)
         selected_ops = self._selected_ops_from_ga_config(best_config)
@@ -532,6 +669,11 @@ class HyperHeuristic:
                 "aco_best_metrics": aco_metrics,
                 "aco_history": search_result["history"],
                 "historical_data_metadata": route_history.metadata or {},
+                "historical_options": historical_options,
+                "historical_metrics": historical_metrics,
+                "historical_comparison": historical_comparison,
+                "aco_heuristic_values": heuristic_values,
+                "historical_output": historical_outputs,
             },
         )
         print(f"HH: Best ACO GA configuration: {best_config}")

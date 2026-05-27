@@ -35,6 +35,7 @@ INSTANCE_FIELDS = {
 HISTORY_FIELDS = {
     "depot",
     "previous_routes",
+    "previous_route_sets",
     "route_costs",
     "route_times",
     "feasibility",

@@ -39,6 +39,27 @@ class DataDrivenComponentTests(unittest.TestCase):
         self.assertEqual(route_history.depot, 0)
         self.assertEqual(route_history.coordinates[1], (1.0, 1.0))
         self.assertEqual(route_history.previous_routes, [[1, 2]])
+        self.assertEqual(route_history.previous_route_sets, [[[1, 2]]])
+
+    def test_historical_loader_accepts_multiple_previous_route_sets(self):
+        config = self.base_config()
+        config["data"] = {
+            "previous_route_sets": [
+                [[1, 2]],
+                [[2], [1]],
+            ]
+        }
+
+        route_history = HistoricalDataLoader(config).load()
+
+        self.assertIsNone(route_history.previous_routes)
+        self.assertEqual(
+            route_history.previous_route_sets,
+            [
+                [[1, 2]],
+                [[2], [1]],
+            ],
+        )
 
     def test_client_records_file_gets_internal_solver_defaults(self):
         client_config = {
@@ -50,6 +71,7 @@ class DataDrivenComponentTests(unittest.TestCase):
             "due_time": {0: 100, 1: 100},
             "service_time": {0: 0, 1: 0},
             "previous_routes": [[1]],
+            "previous_route_sets": [[[1]], [[1]]],
         }
 
         normalized, changed = normalize_client_config(client_config)
@@ -59,6 +81,7 @@ class DataDrivenComponentTests(unittest.TestCase):
         self.assertIn("aco", normalized)
         self.assertEqual(normalized["instance"]["coordinates"][1], [1, 1])
         self.assertEqual(normalized["data"]["previous_routes"], [[1]])
+        self.assertEqual(normalized["data"]["previous_route_sets"], [[[1]], [[1]]])
         self.assertEqual(normalized["parameters"]["crossover_prob"], 0.8)
 
     def test_configuration_space_filters_pd_operators_by_explicit_constraints(self):

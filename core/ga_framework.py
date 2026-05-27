@@ -10,6 +10,7 @@ from copy import deepcopy
 from core.operators import crossover
 from core.operators import mutation
 from core.operators import selection
+from core.data.historical_solution_builder import HistoricalSolutionBuilder
 from core.hyperheuristic.component_registry import build_default_registry
 
 DEPOT = 0
@@ -52,6 +53,11 @@ class GAFramework:
         self.evaluation_ops = evaluation_ops or []
         self.replacement_ops = replacement_ops or []
         self.termination_ops = termination_ops or []
+        self.constraints = list(params.get("constraints", []))
+        self.historical_routes = params.get("historical_routes")
+        self.historical_seed_fraction = float(params.get("historical_seed_fraction", 0.0))
+        self.historical_variants_per_seed = int(params.get("historical_variants_per_seed", 2))
+        self.seed = int(params["seed"])
 
         # --- DYNAMIC OBJECTIVE FUNCTION SELECTION ---
         objective = params.get("objective", "distance").lower()
@@ -125,13 +131,29 @@ class GAFramework:
         else:
             customers = [k for k in self.inst.demand.keys() if k != DEPOT]
             
-        pop = []
+        pop = self._historical_seed_population()
         for _ in range(self.pop_size):
+            if len(pop) >= self.pop_size:
+                break
             random.shuffle(customers)
             routes = self._greedy_seed_routes(customers)
             chrom = self.inst.routes_to_chromosome(routes)
             pop.append(chrom)
         return pop
+
+    def _historical_seed_population(self):
+        if not self.historical_routes or self.historical_seed_fraction <= 0:
+            return []
+
+        max_seeds = int(round(self.pop_size * self.historical_seed_fraction))
+        max_seeds = max(1, min(self.pop_size, max_seeds))
+        builder = HistoricalSolutionBuilder(self.inst, self.constraints)
+        return builder.build_seed_population(
+            self.historical_routes,
+            max_seeds=max_seeds,
+            variants_per_seed=self.historical_variants_per_seed,
+            seed=self.seed,
+        )
 
     # ---------- evaluation ----------
     def evaluate(self, chrom):
@@ -314,6 +336,14 @@ class GARunner:
             "seed": int(seed),
             "objective": self.ga_config.get("objective", "distance"),
             "verbose": bool(self.ga_config.get("verbose", False)),
+            "constraints": list(self.constraints),
+            "historical_routes": self.ga_config.get("historical_routes"),
+            "historical_seed_fraction": float(
+                self.ga_config.get("historical_seed_fraction", 0.0)
+            ),
+            "historical_variants_per_seed": int(
+                self.ga_config.get("historical_variants_per_seed", 2)
+            ),
             "operators": {
                 "crossover": self.ga_config.get("crossover"),
                 "mutation": self._as_list(self.ga_config.get("mutation", [])),
